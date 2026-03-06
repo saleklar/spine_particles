@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
+import Stats from 'three/examples/jsm/libs/stats.module.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { SceneObject, EmitterObject, EmitterShapeObject, SnapSettings, PhysicsForce } from './App';
 
@@ -364,6 +365,28 @@ export function Scene3D({ sceneSize, sceneSettings, snapSettings, viewMode, onVi
     renderer.setPixelRatio(window.devicePixelRatio);
     containerRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
+
+    const stats = new Stats();
+    stats.dom.style.position = 'absolute';
+    stats.dom.style.top = '10px';
+    stats.dom.style.left = '10px';
+    containerRef.current.appendChild(stats.dom);
+
+    const statsDisplay = document.createElement('div');
+    statsDisplay.style.position = 'absolute';
+    statsDisplay.style.top = '60px';
+    statsDisplay.style.left = '10px';
+    statsDisplay.style.color = '#0f0';
+    statsDisplay.style.backgroundColor = 'rgba(0,0,0,0.7)';
+    statsDisplay.style.padding = '4px 8px';
+    statsDisplay.style.fontFamily = 'monospace';
+    statsDisplay.style.fontSize = '12px';
+    statsDisplay.style.borderRadius = '4px';
+    statsDisplay.style.pointerEvents = 'none';
+    statsDisplay.style.zIndex = '1000';
+    statsDisplay.style.border = '1px solid #0f0';
+    statsDisplay.innerText = 'Particles: 0\nEmitters: 0';
+    containerRef.current.appendChild(statsDisplay);
 
     // Transform controls setup
     const transformControls = new TransformControls(camera, renderer.domElement);
@@ -1096,6 +1119,8 @@ export function Scene3D({ sceneSize, sceneSettings, snapSettings, viewMode, onVi
 
       const activeCamera = currentCameraRef.current;
       if (!activeCamera) return;
+
+      stats.update();
 
       const cameraState = cameraStateRef.current;
 
@@ -2199,6 +2224,17 @@ export function Scene3D({ sceneSize, sceneSettings, snapSettings, viewMode, onVi
 
       lastTimelineFrameRef.current = timelineFrame;
 
+      // Update particle stats every few frames
+      if (Math.random() < 0.1) {
+        let totalParticles = 0;
+        let numEmitters = 0;
+        particleSystemsRef.current.forEach((system) => {
+          totalParticles += system.particles.length;
+          numEmitters++;
+        });
+        statsDisplay.innerText = `Particles: ${totalParticles}\nEmitters: ${numEmitters}`;
+      }
+
       renderer.render(scene, activeCamera);
     };
     animate();
@@ -2231,8 +2267,16 @@ export function Scene3D({ sceneSize, sceneSettings, snapSettings, viewMode, onVi
       cancelAnimationFrame(animationFrameId);
       renderer.dispose();
       gridHelpersRef.current = [];
-      if (containerRef.current && renderer.domElement.parentNode === containerRef.current) {
-        containerRef.current.removeChild(renderer.domElement);
+      if (containerRef.current) {
+        if (renderer.domElement.parentNode === containerRef.current) {
+          containerRef.current.removeChild(renderer.domElement);
+        }
+        if (stats.dom.parentNode === containerRef.current) {
+          containerRef.current.removeChild(stats.dom);
+        }
+        if (statsDisplay.parentNode === containerRef.current) {
+          containerRef.current.removeChild(statsDisplay);
+        }
       }
     };
   }, [sceneSize.x, sceneSize.y, sceneSize.z]);
