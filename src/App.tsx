@@ -14,6 +14,7 @@ type SceneSettings = {
   zoomSpeed: number;
   particlePreviewMode: 'real' | 'white-dots';
   particlePreviewSize: number;
+  particleBudget: number;
 };
 
 export type SnapSettings = {
@@ -117,6 +118,7 @@ const DEFAULT_SCENE_SETTINGS: SceneSettings = {
   zoomSpeed: 12,
   particlePreviewMode: 'real',
   particlePreviewSize: 1.2,
+  particleBudget: 500,
 };
 
 const DEFAULT_SNAP_SETTINGS: SnapSettings = {
@@ -2195,6 +2197,22 @@ export function App() {
                     step={0.1}
                     type="range"
                     value={sceneSettings.particlePreviewSize}
+                  />
+
+                  <label htmlFor="particle-budget" style={{ marginTop: '10px' }} title="Limits total concurrent particles. Use lower budgets and larger particle sizes for efficient Spine animations.">
+                    Global Particle Budget: {sceneSettings.particleBudget} <small style={{ color: '#888' }}>(Max per frame)</small>
+                  </label>
+                  <input
+                    id="particle-budget"
+                    max={2000}
+                    min={10}
+                    onChange={(event) => setSceneSettings((prev) => ({
+                      ...prev,
+                      particleBudget: Number.parseInt(event.target.value, 10),
+                    }))}
+                    step={10}
+                    type="range"
+                    value={sceneSettings.particleBudget}
                   />
                 </div>
               )}

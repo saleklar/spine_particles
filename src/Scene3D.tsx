@@ -16,6 +16,7 @@ type SceneSettings = {
   zoomSpeed: number;
   particlePreviewMode: 'real' | 'white-dots';
   particlePreviewSize: number;
+  particleBudget: number;
 };
 
 const DEFAULT_THETA = Math.PI / 4;
@@ -46,6 +47,7 @@ type Scene3DProps = {
 
 type CachedParticleState = {
   emitterId: string;
+  trackId: number; // For Spine bone pooling
   position: { x: number; y: number; z: number };
   velocity: { x: number; y: number; z: number };
   lifetime: number;
@@ -106,7 +108,8 @@ export function Scene3D({ sceneSize, sceneSettings, snapSettings, viewMode, onVi
   const sceneObjectMeshesRef = useRef<Map<string, THREE.Object3D>>(new Map());
   const physicsForceGizmosRef = useRef<Map<string, THREE.Object3D>>(new Map());
   const particleSystemsRef = useRef<Map<string, {
-    particles: Array<{ 
+    particles: Array<{
+      trackId: number; // Persistent ID for bone reuse
       mesh: THREE.Points | THREE.Sprite;
       velocity: THREE.Vector3; 
       lifetime: number; 
@@ -1427,6 +1430,7 @@ export function Scene3D({ sceneSize, sceneSettings, snapSettings, viewMode, onVi
             const material = getParticleMaterial(particle.mesh);
             snapshot.push({
               emitterId,
+              trackId: particle.trackId,
               position: {
                 x: particle.mesh.position.x,
                 y: particle.mesh.position.y,
@@ -1514,6 +1518,7 @@ export function Scene3D({ sceneSize, sceneSettings, snapSettings, viewMode, onVi
 
           scene.add(particleMesh);
           particleSystem.particles.push({
+            trackId: cached.trackId ?? 0, // Restore the bone/track ID for Spine export
             mesh: particleMesh,
             velocity: new THREE.Vector3(cached.velocity.x, cached.velocity.y, cached.velocity.z),
             lifetime: cached.lifetime,
@@ -1548,6 +1553,12 @@ export function Scene3D({ sceneSize, sceneSettings, snapSettings, viewMode, onVi
       const restoredFromCache = frameChanged && restoreParticleFrame(timelineFrame);
 
       if (!restoredFromCache) {
+        let globalActiveParticles = 0;
+        particleSystemsRef.current.forEach((system) => {
+          globalActiveParticles += system.particles.length;
+        });
+        const particleBudget = sceneSettingsRef.current.particleBudget ?? 500;
+
         sceneObjectsRef.current.forEach(obj => {
           if (obj.type === 'Emitter') {
             const emitter = obj as EmitterObject;
@@ -1595,9 +1606,14 @@ export function Scene3D({ sceneSize, sceneSettings, snapSettings, viewMode, onVi
                   },
                 } as EmitterShapeObject];
               const sourceExtent = 25;
-              
+
               // Emit new particles when playing or actively caching
-              if ((isPlayingRef.current || isCachingRef.current) && timeSinceLastEmit >= emissionInterval && activeSources.length > 0) {
+              const isUnderBudget = globalActiveParticles < particleBudget;
+
+              if (isUnderBudget && (isPlayingRef.current || isCachingRef.current) && timeSinceLastEmit >= emissionInterval && activeSources.length > 0) {
+                // Keep budget tracked correctly if multiple particles spawn across different emitters in the same frame
+                globalActiveParticles++;
+                
                 const sourceNode = activeSources[Math.floor(Math.random() * activeSources.length)];
                 const sourceProps = (sourceNode.properties ?? {}) as Record<string, any>;
                 const emitterType = sourceProps.emitterType ?? inferEmitterTypeFromSource(sourceNode);
@@ -1829,9 +1845,18 @@ export function Scene3D({ sceneSize, sceneSettings, snapSettings, viewMode, onVi
                 const emitterLifetime = emitterProps.particleLifetime ?? 3;
                 const emitterLifetimeVariation = emitterProps.particleLifetimeVariation ?? 0;
                 const particleLifetime = emitterLifetime * (1 - emitterLifetimeVariation * 0.5 + Math.random() * emitterLifetimeVariation);
-                
+
+                // Find lowest available track ID for pooling/Spine export bone reuse
+                const activeTracks = new Set<number>();
+                particleSystem.particles.forEach(p => activeTracks.add(p.trackId));
+                let spawnTrackId = 0;
+                while (activeTracks.has(spawnTrackId)) {
+                  spawnTrackId++;
+                }
+
                 scene.add(particleMesh);
                 particleSystem.particles.push({
+                  trackId: spawnTrackId,
                   mesh: particleMesh,
                   velocity,
                   lifetime: particleLifetime,
