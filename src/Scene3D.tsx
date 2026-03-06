@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import * as THREE from 'three';
 import Stats from 'three/examples/jsm/libs/stats.module.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
@@ -59,7 +59,11 @@ type CachedParticleState = {
 
 type ParticleVisualType = 'dots' | 'stars' | 'circles' | 'glow-circles' | 'sprites';
 
-export function Scene3D({ sceneSize, sceneSettings, snapSettings, viewMode, onViewModeChange, sceneObjects, currentFrame, isPlaying, isCaching, physicsForces, selectedObjectId, selectedForceId, onObjectSelect, onForceSelect, onObjectTransform, onForceTransform, handleScale = 1.0, onCacheFrameCountChange, cacheResetToken = 0 }: Scene3DProps) {
+export interface Scene3DRef {
+  exportSpineData: () => any;
+}
+
+export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneSettings, snapSettings, viewMode, onViewModeChange, sceneObjects, currentFrame, isPlaying, isCaching, physicsForces, selectedObjectId, selectedForceId, onObjectSelect, onForceSelect, onObjectTransform, onForceTransform, handleScale = 1.0, onCacheFrameCountChange, cacheResetToken = 0 }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -3368,5 +3372,99 @@ export function Scene3D({ sceneSize, sceneSettings, snapSettings, viewMode, onVi
     };
   }, [onViewModeChange]);
 
+  useImperativeHandle(ref, () => ({
+    exportSpineData: () => {
+      // Gather data across all cached frames
+      const spineData = {
+        skeleton: {
+          hash: "particle-export",
+          spine: "4.1.00",
+          x: -sceneSize.x / 2,
+          y: -sceneSize.y / 2,
+          width: sceneSize.x,
+          height: sceneSize.y,
+          fps: 24,
+        },
+        bones: [] as any[],
+        slots: [] as any[],
+        skins: [{ name: "default", attachments: {} }] as any[],
+        animations: { animation: { slots: {} as any, bones: {} as any } }
+      };
+
+      const frames = Array.from(particleFrameCacheRef.current.entries())
+        .sort((a, b) => a[0] - b[0]);
+      
+      if (frames.length === 0) return null;
+
+      const trackData = new Map<number, { frame: number, state: CachedParticleState }[]>();
+
+      // Group states by trackId
+      for (const [frameObj, states] of frames) {
+        for (const state of states) {
+          if (!trackData.has(state.trackId)) trackData.set(state.trackId, []);
+          trackData.get(state.trackId)!.push({ frame: frameObj, state });
+        }
+      }
+
+      // Root bone
+      spineData.bones.push({ name: "root" });
+
+      trackData.forEach((history, trackId) => {
+        const boneName = `track_${trackId}`;
+        const slotName = `slot_${trackId}`;
+        
+        spineData.bones.push({ name: boneName, parent: "root" });
+        spineData.slots.push({ name: slotName, bone: boneName, attachment: "particle" });
+
+        const skinAttachments = spineData.skins[0].attachments as any;
+        skinAttachments[slotName] = { "particle": { type: "region", name: "particle", width: 64, height: 64 } };
+
+        const boneAnim = { translate: [] as any[], scale: [] as any[] };
+        const slotAnim = { color: [] as any[] };
+
+        // For determining gaps where particle is dead/reborn
+        let lastFrame = -2;
+
+        for (const { frame, state } of history) {
+          const time = frame / 24;
+          
+          if (frame > lastFrame + 1 && lastFrame !== -2) {
+             // It was dead, zero out old and new frame
+             slotAnim.color.push({ time: (lastFrame + 1) / 24, color: "ffffff00" });
+             slotAnim.color.push({ time: (frame - 0.01) / 24, color: "ffffff00" });
+          }
+
+          // Use age/lifetime to fade out gracefully
+          const alphaFade = Math.max(0, Math.min(1, 1 - (state.age / state.lifetime)));
+          const baseAlpha = Math.max(0, Math.min(1, state.opacity));
+          const finalAlpha = Math.floor(alphaFade * baseAlpha * 255).toString(16).padStart(2, '0');
+          
+          slotAnim.color.push({ time, color: `ffffff${finalAlpha}` });
+
+          boneAnim.translate.push({
+             time,
+             // Map Three.js Y-up coordinates to Spine coordinates, scaling by arbitrary factor or exact scene sizing
+             x: state.position.x,
+             y: state.position.y
+          });
+          
+          const sizeScale = state.size / 10; // arbitrary base size ratio
+          boneAnim.scale.push({
+             time,
+             x: sizeScale,
+             y: sizeScale
+          });
+
+          lastFrame = frame;
+        }
+
+        spineData.animations.animation.bones[boneName] = boneAnim;
+        spineData.animations.animation.slots[slotName] = slotAnim;
+      });
+
+      return spineData;
+    }
+  }));
+
   return <div className="scene-canvas" ref={containerRef} tabIndex={0} />;
-}
+});

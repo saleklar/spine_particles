@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Scene3D } from './Scene3D';
+import { Scene3D, Scene3DRef } from './Scene3D';
 import { Animator3D } from './Animator3D';
 
 type SceneSize = {
@@ -197,6 +197,24 @@ export function App() {
   const [showCreateSubmenu, setShowCreateSubmenu] = useState<'3D' | '2D' | null>(null);
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
   const [draftSize, setDraftSize] = useState<SceneSize>(DEFAULT_SCENE_SIZE);
+  const scene3DRef = useRef<Scene3DRef>(null);
+
+  const handleExportSpine = () => {
+    if (!scene3DRef.current) return;
+    const spineData = scene3DRef.current.exportSpineData();
+    if (!spineData) {
+      alert("No particle cache data available. Please play the animation to cache frames first.");
+      return;
+    }
+    const jsonString = JSON.stringify(spineData, null, 2);
+    const blob = new Blob([jsonString], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'particle_export_spine.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
   const [sceneSize, setSceneSize] = useState<SceneSize>(DEFAULT_SCENE_SIZE);
   const [sceneSettings, setSceneSettings] = useState<SceneSettings>(DEFAULT_SCENE_SETTINGS);
   const [snapSettings, setSnapSettings] = useState<SnapSettings>(DEFAULT_SNAP_SETTINGS);
@@ -2467,8 +2485,9 @@ export function App() {
             setShowCreateSubmenu(null);
           }}
         >
-          <Scene3D 
-            sceneSize={sceneSize} 
+          <Scene3D
+              ref={scene3DRef}
+              sceneSize={sceneSize} 
             sceneSettings={sceneSettings} 
             snapSettings={snapSettings}
             viewMode={viewMode} 
@@ -3510,7 +3529,13 @@ export function App() {
                           />
                           Show Particle Paths for Spine Export
                         </label>
-
+                        <button
+                            className="properties-panel-button"
+                            style={{ marginTop: '0.5rem', backgroundColor: '#eeb868', color: '#1a1a1a' }}
+                            onClick={handleExportSpine}
+                        >
+                            Export Cached Animation to Spine JSON
+                        </button>
                         {(selectedEmitterProperties.showPathCurves) && (
                           <>
                             <label htmlFor="path-curve-keys">
