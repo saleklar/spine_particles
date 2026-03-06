@@ -1,0 +1,1178 @@
+import React, { useEffect, useRef, useState } from 'react';
+import * as THREE from 'three';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import { RGBShiftShader } from 'three/examples/jsm/shaders/RGBShiftShader.js';
+import { 
+  AnimatorObject, 
+  AnimatorLightSettings, 
+  AnimatorRenderSettings,
+  AnimatorEffectsSettings,
+  AnimatorAnimationSettings,
+  RenderProgress 
+} from './Animator3DTypes';
+
+const StarGlintShader = {
+  uniforms: {
+    tDiffuse: { value: null },
+    resolution: { value: new THREE.Vector2(1, 1) },
+    threshold: { value: 0.72 },
+    centerThreshold: { value: 0.68 },
+    intensity: { value: 0.8 },
+    spread: { value: 1.0 },
+    rayLength: { value: 1.0 },
+    rayBoost: { value: 1.0 },
+    horizontalBlur: { value: 1.0 },
+    verticalBlur: { value: 1.0 },
+    glowBlur: { value: 0.0 },
+  },
+  vertexShader: `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    precision mediump float;
+    uniform sampler2D tDiffuse;
+    uniform vec2 resolution;
+    uniform float threshold;
+    uniform float centerThreshold;
+    uniform float intensity;
+    uniform float spread;
+    uniform float rayLength;
+    uniform float rayBoost;
+    uniform float horizontalBlur;
+    uniform float verticalBlur;
+    uniform float glowBlur;
+    varying vec2 vUv;
+
+    float getLum(vec3 color) {
+      return dot(color, vec3(0.2126, 0.7152, 0.0722));
+    }
+
+    void main() {
+      vec4 baseSample = texture2D(tDiffuse, vUv);
+      vec3 base = baseSample.rgb;
+      
+      vec2 pixel = vec2(1.0 / resolution.x, 1.0 / resolution.y);
+      
+      // Sample horizontal blur with smooth falloff
+      float hGlow = 0.0;
+      float hRange = 60.0 * (1.0 + horizontalBlur * 3.0);
+      for (float x = -3.0; x <= 3.0; x += 0.05) {
+        vec3 sampleColor = texture2D(tDiffuse, clamp(vUv + vec2(x * hRange * pixel.x, 0.0), 0.001, 0.999)).rgb;
+        float lum = getLum(sampleColor);
+        float dist = abs(x) / 3.0;
+        float falloff = exp(-dist * dist * 3.0);
+        hGlow += max(0.0, lum - centerThreshold) * falloff + lum * falloff * 0.1;
+      }
+      hGlow /= 120.0;
+      
+      // Sample vertical blur with smooth falloff
+      float vGlow = 0.0;
+      float vRange = 60.0 * (1.0 + verticalBlur * 3.0);
+      for (float y = -3.0; y <= 3.0; y += 0.05) {
+        vec3 sampleColor = texture2D(tDiffuse, clamp(vUv + vec2(0.0, y * vRange * pixel.y), 0.001, 0.999)).rgb;
+        float lum = getLum(sampleColor);
+        float dist = abs(y) / 3.0;
+        float falloff = exp(-dist * dist * 3.0);
+        vGlow += max(0.0, lum - centerThreshold) * falloff + lum * falloff * 0.1;
+      }
+      vGlow /= 120.0;
+      
+      // Current pixel brightness
+      float currentLum = getLum(base);
+      
+      // Smooth gradient from center outward
+      float starGlow = currentLum * 0.8;
+      starGlow += (hGlow + vGlow) * 0.5;
+      
+      // Apply soft blur to glow by blending with neighborhood
+      if (glowBlur > 0.01) {
+        float neighborhood = 0.0;
+        float blurPx = glowBlur / resolution.x;
+        
+        // Sample 8 neighbors
+        neighborhood += getLum(texture2D(tDiffuse, vUv + vec2(-blurPx, -blurPx)).rgb);
+        neighborhood += getLum(texture2D(tDiffuse, vUv + vec2(0.0, -blurPx)).rgb);
+        neighborhood += getLum(texture2D(tDiffuse, vUv + vec2(blurPx, -blurPx)).rgb);
+        neighborhood += getLum(texture2D(tDiffuse, vUv + vec2(-blurPx, 0.0)).rgb);
+        neighborhood += getLum(texture2D(tDiffuse, vUv + vec2(blurPx, 0.0)).rgb);
+        neighborhood += getLum(texture2D(tDiffuse, vUv + vec2(-blurPx, blurPx)).rgb);
+        neighborhood += getLum(texture2D(tDiffuse, vUv + vec2(0.0, blurPx)).rgb);
+        neighborhood += getLum(texture2D(tDiffuse, vUv + vec2(blurPx, blurPx)).rgb);
+        neighborhood /= 8.0;
+        
+        // Blend glow with neighborhood for softness
+        float blurFactor = clamp(glowBlur / 10.0, 0.0, 1.0);
+        starGlow = mix(starGlow, neighborhood, blurFactor * 0.4);
+      }
+      
+      vec3 starColor = vec3(1.0, 0.97, 0.88);
+      vec3 glowAdd = starColor * starGlow * intensity * (0.5 + rayBoost * 1.2);
+      vec3 color = base + glowAdd;
+      
+      gl_FragColor = vec4(color, baseSample.a);
+    }
+  `,
+};
+
+type Scene3DAnimatorProps = {
+  animatorObject: AnimatorObject;
+  lighting: AnimatorLightSettings;
+  animation: AnimatorAnimationSettings;
+  renderSettings: AnimatorRenderSettings;
+  effects: AnimatorEffectsSettings;
+  backgroundColor: string;
+  isRendering: boolean;
+  isPreviewPlaying: boolean;
+  previewResetToken: number;
+  onRenderProgress?: (progress: RenderProgress) => void;
+  onRenderComplete?: (frames: Blob[]) => void;
+  onSnapshotReady?: (blob: Blob) => void;
+  disablePostProcessing?: boolean;
+};
+
+export function Scene3DAnimator({
+  animatorObject,
+  lighting,
+  animation,
+  renderSettings,
+  effects,
+  backgroundColor,
+  isRendering,
+  isPreviewPlaying,
+  previewResetToken,
+  onRenderProgress,
+  onRenderComplete,
+  onSnapshotReady,
+  disablePostProcessing,
+}: Scene3DAnimatorProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const sceneRef = useRef<THREE.Scene | null>(null);
+  const helperSceneRef = useRef<THREE.Scene | null>(null);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const objectRef = useRef<THREE.Mesh | null>(null);
+  const gridHelperRef = useRef<THREE.GridHelper | null>(null);
+  const axesHelperRef = useRef<THREE.AxesHelper | null>(null);
+  const composerRef = useRef<EffectComposer | null>(null);
+  const bloomPassRef = useRef<UnrealBloomPass | null>(null);
+  const lensPassRef = useRef<ShaderPass | null>(null);
+  const starGlintPassRef = useRef<ShaderPass | null>(null);
+  const blurGlintPassRef = useRef<ShaderPass | null>(null);
+  const sparklesRef = useRef<THREE.Points | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  const renderRequestRef = useRef<{
+    isRendering: boolean;
+    currentFrame: number;
+    frames: Blob[];
+  }>({
+    isRendering: false,
+    currentFrame: 0,
+    frames: [],
+  });
+
+  const animationRef = useRef(animation);
+  const effectsRef = useRef(effects);
+  const previewPlayingRef = useRef(isPreviewPlaying);
+  const previewStateRef = useRef<{
+    startTimeMs: number;
+    baseCaptured: boolean;
+    baseRotation: THREE.Euler;
+    basePosition: THREE.Vector3;
+    baseScale: THREE.Vector3;
+    baseCameraPosition: THREE.Vector3;
+  }>({
+    startTimeMs: 0,
+    baseCaptured: false,
+    baseRotation: new THREE.Euler(),
+    basePosition: new THREE.Vector3(),
+    baseScale: new THREE.Vector3(1, 1, 1),
+    baseCameraPosition: new THREE.Vector3(),
+  });
+
+  // Camera control state
+  const cameraControlRef = useRef({
+    isRotating: false,
+    isPanning: false,
+    lastX: 0,
+    lastY: 0,
+    theta: 0, // horizontal angle
+    phi: Math.PI / 4, // vertical angle
+    radius: 500, // distance from target
+    targetX: 0,
+    targetY: 0,
+    targetZ: 0,
+  });
+
+  const renderSceneFrame = (includeHelpers: boolean, usePostProcessing: boolean = true) => {
+    if (!rendererRef.current || !sceneRef.current || !cameraRef.current) return;
+
+    const renderer = rendererRef.current;
+    const scene = sceneRef.current;
+    const camera = cameraRef.current;
+
+    if (usePostProcessing && composerRef.current) {
+      try {
+        composerRef.current.render();
+      } catch (error) {
+        console.warn('Post-processing failed, falling back to base renderer:', error);
+        composerRef.current = null;
+        bloomPassRef.current = null;
+        lensPassRef.current = null;
+        starGlintPassRef.current = null;
+        blurGlintPassRef.current = null;
+        renderer.render(scene, camera);
+      }
+    } else {
+      renderer.render(scene, camera);
+    }
+
+    if (includeHelpers && helperSceneRef.current) {
+      const previousAutoClear = renderer.autoClear;
+      renderer.autoClear = false;
+      renderer.clearDepth();
+      renderer.render(helperSceneRef.current, camera);
+      renderer.autoClear = previousAutoClear;
+    }
+  };
+
+  const rebuildPostProcessing = () => {
+    if (!rendererRef.current || !sceneRef.current || !cameraRef.current) return;
+
+    composerRef.current = null;
+    bloomPassRef.current = null;
+    lensPassRef.current = null;
+    starGlintPassRef.current = null;
+    blurGlintPassRef.current = null;
+
+    if (disablePostProcessing) {
+      return;
+    }
+
+    const { bloom, lens, sparkles } = effectsRef.current;
+    const useStarGlint = sparkles.shinyGlints;
+    if (!bloom.enabled && !lens.enabled && !useStarGlint) {
+      return;
+    }
+
+    const renderer = rendererRef.current;
+    const scene = sceneRef.current;
+    const camera = cameraRef.current;
+
+    const composer = new EffectComposer(renderer);
+    const renderPass = new RenderPass(scene, camera);
+    composer.addPass(renderPass);
+
+    if (bloom.enabled) {
+      const rendererSize = renderer.getSize(new THREE.Vector2());
+      const bloomPass = new UnrealBloomPass(
+        new THREE.Vector2(rendererSize.x, rendererSize.y),
+        bloom.intensity,
+        bloom.radius,
+        bloom.threshold
+      );
+      bloomPass.strength = bloom.intensity;
+      bloomPass.radius = bloom.radius;
+      bloomPass.threshold = bloom.threshold;
+      composer.addPass(bloomPass);
+      bloomPassRef.current = bloomPass;
+    }
+
+    if (lens.enabled) {
+      const lensPass = new ShaderPass(RGBShiftShader);
+      lensPass.uniforms['amount'].value = lens.amount;
+      composer.addPass(lensPass);
+      lensPassRef.current = lensPass;
+    }
+
+    if (useStarGlint) {
+      const starPass = new ShaderPass(StarGlintShader as any);
+      const size = renderer.getSize(new THREE.Vector2());
+      starPass.uniforms['resolution'].value.set(size.x, size.y);
+      starPass.uniforms['threshold'].value = Math.max(0.2, Math.min(0.98, sparkles.glintThreshold));
+      starPass.uniforms['centerThreshold'].value = Math.max(0.2, Math.min(0.98, sparkles.glintCenterThreshold));
+      starPass.uniforms['intensity'].value = Math.max(0, sparkles.intensity);
+      starPass.uniforms['spread'].value = Math.max(0.2, sparkles.glintSpread);
+      starPass.uniforms['rayLength'].value = Math.max(0.5, sparkles.glintRayLength);
+      starPass.uniforms['rayBoost'].value = Math.max(0.5, sparkles.glintRayBoost);
+      starPass.uniforms['horizontalBlur'].value = Math.max(0, sparkles.glintHorizontalBlur);
+      starPass.uniforms['verticalBlur'].value = Math.max(0, sparkles.glintVerticalBlur);
+      starPass.uniforms['glowBlur'].value = Math.max(0, (sparkles as any).glowBlur || 0);
+      composer.addPass(starPass);
+      starGlintPassRef.current = starPass;
+    }
+
+    const size = renderer.getSize(new THREE.Vector2());
+    composer.setSize(size.x, size.y);
+    composerRef.current = composer;
+  };
+
+  const rebuildSparkles = () => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+
+    if (sparklesRef.current) {
+      scene.remove(sparklesRef.current);
+      sparklesRef.current.geometry.dispose();
+      (sparklesRef.current.material as THREE.PointsMaterial).dispose();
+      sparklesRef.current = null;
+    }
+
+    const sparkleSettings = effectsRef.current.sparkles;
+    if (!sparkleSettings.enabled) return;
+
+    const count = Math.max(10, Math.min(500, Math.round(sparkleSettings.count)));
+    const positions = new Float32Array(count * 3);
+
+    for (let i = 0; i < count; i++) {
+      const radius = 120 + Math.random() * 80;
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      const index = i * 3;
+
+      positions[index] = radius * Math.sin(phi) * Math.cos(theta);
+      positions[index + 1] = radius * Math.cos(phi);
+      positions[index + 2] = radius * Math.sin(phi) * Math.sin(theta);
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+    const material = new THREE.PointsMaterial({
+      color: 0xfff7cf,
+      size: sparkleSettings.size,
+      transparent: true,
+      opacity: Math.max(0, Math.min(1, sparkleSettings.intensity)),
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+
+    const sparkles = new THREE.Points(geometry, material);
+    scene.add(sparkles);
+    sparklesRef.current = sparkles;
+  };
+
+  const updateEffectDynamics = (timeSeconds: number) => {
+    if (sparklesRef.current) {
+      sparklesRef.current.rotation.y += 0.0015 * effectsRef.current.sparkles.speed;
+      const sparkleMaterial = sparklesRef.current.material as THREE.PointsMaterial;
+      const pulse = 0.55 + 0.45 * Math.sin(timeSeconds * 3 * Math.max(0.1, effectsRef.current.sparkles.speed));
+      sparkleMaterial.opacity = Math.max(0, Math.min(1.2, effectsRef.current.sparkles.intensity * pulse));
+    }
+  };
+
+  const fitCameraForRender = (camera: THREE.PerspectiveCamera, object: THREE.Object3D) => {
+    const box = new THREE.Box3().setFromObject(object);
+    if (box.isEmpty()) return;
+
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const radius = Math.max(8, size.length() * 0.5);
+
+    const direction = camera.position.clone().sub(center);
+    if (direction.lengthSq() < 0.0001) {
+      direction.set(0, 0, 1);
+    }
+    direction.normalize();
+
+    const fovRad = THREE.MathUtils.degToRad(camera.fov);
+    const fitDistance = Math.max(60, radius / Math.sin(Math.max(0.2, fovRad * 0.5)) * 1.15);
+    camera.position.copy(center.clone().add(direction.multiplyScalar(fitDistance)));
+    camera.near = Math.max(0.1, fitDistance / 500);
+    camera.far = Math.max(2000, fitDistance * 15);
+    camera.lookAt(center);
+    camera.updateProjectionMatrix();
+  };
+
+  const captureSnapshot = () => {
+    if (!rendererRef.current) return;
+    
+    rendererRef.current.domElement.toBlob((blob) => {
+      if (blob && onSnapshotReady) {
+        onSnapshotReady(blob);
+      }
+    }, 'image/png', 1.0);
+  };
+
+  // Expose snapshot to parent via window
+  React.useEffect(() => {
+    if (containerRef.current && typeof window !== 'undefined') {
+      (window as any).__captureSnapshot = captureSnapshot;
+    }
+  }, [onSnapshotReady]);
+
+  // Initialize scene
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    const container = containerRef.current;
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+
+    // Scene
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(backgroundColor);
+    sceneRef.current = scene;
+
+    const helperScene = new THREE.Scene();
+    helperSceneRef.current = helperScene;
+
+    // Camera
+    const camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 10000);
+    camera.position.set(0, 0, 500);
+    camera.lookAt(0, 0, 0);
+    cameraRef.current = camera;
+
+    // Renderer
+    const renderer = new THREE.WebGLRenderer({ 
+      antialias: renderSettings.antialias,
+      preserveDrawingBuffer: true, // Important for capturing frames
+      alpha: true, // Always enable alpha for proper transparency support
+      premultipliedAlpha: false, // Don't premultiply alpha
+    });
+    renderer.setSize(width, height);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setClearColor(0x000000, 0); // Transparent clear color
+    
+    if (renderSettings.shadows) {
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFShadowMap;
+    }
+    
+    container.appendChild(renderer.domElement);
+    rendererRef.current = renderer;
+
+    // Grid helper
+    const gridHelper = new THREE.GridHelper(400, 20, 0x444444, 0x222222);
+    helperScene.add(gridHelper);
+    gridHelperRef.current = gridHelper;
+
+    // Axes helper
+    const axesHelper = new THREE.AxesHelper(200);
+    helperScene.add(axesHelper);
+    axesHelperRef.current = axesHelper;
+
+    // Setup lighting
+    setupLighting(scene, lighting);
+
+    // Create object
+    createObject(scene, animatorObject);
+
+    // Setup post effects
+    effectsRef.current = effects;
+    rebuildPostProcessing();
+    rebuildSparkles();
+
+    // Animation loop (preview)
+    const animate = () => {
+      animationFrameRef.current = requestAnimationFrame(animate);
+
+      if (
+        previewPlayingRef.current &&
+        !renderRequestRef.current.isRendering &&
+        objectRef.current &&
+        cameraRef.current
+      ) {
+        const anim = animationRef.current;
+        const totalFrames = Math.max(1, anim.duration);
+        const currentFrame = ((performance.now() - previewStateRef.current.startTimeMs) / 1000) * anim.fps;
+        const loopedFrame = currentFrame % totalFrames;
+        const progress = loopedFrame / totalFrames;
+
+        const object = objectRef.current;
+        const camera = cameraRef.current;
+        const base = previewStateRef.current;
+
+        object.rotation.x = base.baseRotation.x + (anim.rotation.x * Math.PI / 180) * loopedFrame;
+        object.rotation.y = base.baseRotation.y + (anim.rotation.y * Math.PI / 180) * loopedFrame;
+        object.rotation.z = base.baseRotation.z + (anim.rotation.z * Math.PI / 180) * loopedFrame;
+
+        object.position.x = base.basePosition.x + anim.position.x * loopedFrame;
+        object.position.y = base.basePosition.y + anim.position.y * loopedFrame;
+        object.position.z = base.basePosition.z + anim.position.z * loopedFrame;
+
+        object.scale.x = base.baseScale.x * (1 + (anim.scale.x - 1) * progress);
+        object.scale.y = base.baseScale.y * (1 + (anim.scale.y - 1) * progress);
+        object.scale.z = base.baseScale.z * (1 + (anim.scale.z - 1) * progress);
+
+        if (anim.cameraPath === 'orbit') {
+          const ctrl = cameraControlRef.current;
+          const angle = (anim.cameraStartAngle + anim.cameraOrbitSpeed * loopedFrame) * Math.PI / 180;
+          const radius = Math.sqrt(
+            (base.baseCameraPosition.x - ctrl.targetX) ** 2 +
+            (base.baseCameraPosition.y - ctrl.targetY) ** 2 +
+            (base.baseCameraPosition.z - ctrl.targetZ) ** 2
+          );
+          camera.position.x = ctrl.targetX + Math.cos(angle) * radius;
+          camera.position.z = ctrl.targetZ + Math.sin(angle) * radius;
+          camera.lookAt(ctrl.targetX, ctrl.targetY, ctrl.targetZ);
+        }
+      }
+      
+      updateEffectDynamics(performance.now() / 1000);
+
+      if (renderer && scene && camera) {
+        renderSceneFrame(true, true);
+      }
+    };
+    animate();
+
+    // Handle resize
+    const handleResize = () => {
+      if (!container || !camera || !renderer) return;
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+      if (composerRef.current) {
+        composerRef.current.setSize(w, h);
+      }
+      if (starGlintPassRef.current) {
+        starGlintPassRef.current.uniforms['resolution'].value.set(w, h);
+      }
+    };
+    window.addEventListener('resize', handleResize);
+
+    // Mouse controls for camera
+    const handleMouseDown = (e: MouseEvent) => {
+      if (e.button === 0) { // Left button - rotate
+        cameraControlRef.current.isRotating = true;
+      } else if (e.button === 2) { // Right button - pan
+        cameraControlRef.current.isPanning = true;
+      }
+      cameraControlRef.current.lastX = e.clientX;
+      cameraControlRef.current.lastY = e.clientY;
+      e.preventDefault();
+    };
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const ctrl = cameraControlRef.current;
+      const deltaX = e.clientX - ctrl.lastX;
+      const deltaY = e.clientY - ctrl.lastY;
+
+      if (ctrl.isRotating) {
+        // Orbit camera
+        ctrl.theta -= deltaX * 0.005;
+        ctrl.phi -= deltaY * 0.005;
+        ctrl.phi = Math.max(0.1, Math.min(Math.PI - 0.1, ctrl.phi));
+        updateCameraPosition();
+      } else if (ctrl.isPanning) {
+        // Pan camera
+        const panSpeed = 0.5;
+        ctrl.targetX -= deltaX * panSpeed;
+        ctrl.targetY += deltaY * panSpeed;
+        updateCameraPosition();
+      }
+
+      ctrl.lastX = e.clientX;
+      ctrl.lastY = e.clientY;
+    };
+
+    const handleMouseUp = () => {
+      cameraControlRef.current.isRotating = false;
+      cameraControlRef.current.isPanning = false;
+    };
+
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const ctrl = cameraControlRef.current;
+      ctrl.radius += e.deltaY * 0.5;
+      ctrl.radius = Math.max(100, Math.min(2000, ctrl.radius));
+      updateCameraPosition();
+    };
+
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+    };
+
+    const updateCameraPosition = () => {
+      if (!cameraRef.current) return;
+      const ctrl = cameraControlRef.current;
+      
+      // Calculate camera position in spherical coordinates
+      const x = ctrl.radius * Math.sin(ctrl.phi) * Math.cos(ctrl.theta);
+      const y = ctrl.radius * Math.cos(ctrl.phi);
+      const z = ctrl.radius * Math.sin(ctrl.phi) * Math.sin(ctrl.theta);
+      
+      cameraRef.current.position.set(
+        x + ctrl.targetX,
+        y + ctrl.targetY,
+        z + ctrl.targetZ
+      );
+      cameraRef.current.lookAt(ctrl.targetX, ctrl.targetY, ctrl.targetZ);
+    };
+
+    container.addEventListener('mousedown', handleMouseDown);
+    container.addEventListener('mousemove', handleMouseMove);
+    container.addEventListener('mouseup', handleMouseUp);
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    container.addEventListener('contextmenu', handleContextMenu);
+    window.addEventListener('mouseup', handleMouseUp); // Catch mouse up outside container
+
+    // Cleanup
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      if (container) {
+        container.removeEventListener('mousedown', handleMouseDown);
+        container.removeEventListener('mousemove', handleMouseMove);
+        container.removeEventListener('mouseup', handleMouseUp);
+        container.removeEventListener('wheel', handleWheel);
+        container.removeEventListener('contextmenu', handleContextMenu);
+      }
+      window.removeEventListener('mouseup', handleMouseUp);
+      if (animationFrameRef.current !== null) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+      if (sparklesRef.current) {
+        scene.remove(sparklesRef.current);
+        sparklesRef.current.geometry.dispose();
+        (sparklesRef.current.material as THREE.PointsMaterial).dispose();
+        sparklesRef.current = null;
+      }
+      if (gridHelperRef.current && helperSceneRef.current) {
+        helperSceneRef.current.remove(gridHelperRef.current);
+      }
+      if (axesHelperRef.current && helperSceneRef.current) {
+        helperSceneRef.current.remove(axesHelperRef.current);
+      }
+      helperSceneRef.current = null;
+      composerRef.current = null;
+      bloomPassRef.current = null;
+      lensPassRef.current = null;
+      starGlintPassRef.current = null;
+      if (renderer) {
+        container.removeChild(renderer.domElement);
+        renderer.dispose();
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    animationRef.current = animation;
+  }, [animation]);
+
+  useEffect(() => {
+    effectsRef.current = effects;
+    rebuildPostProcessing();
+    rebuildSparkles();
+  }, [effects]);
+
+  useEffect(() => {
+    previewPlayingRef.current = isPreviewPlaying;
+
+    if (!objectRef.current || !cameraRef.current) return;
+
+    if (isPreviewPlaying) {
+      previewStateRef.current.baseRotation.copy(objectRef.current.rotation);
+      previewStateRef.current.basePosition.copy(objectRef.current.position);
+      previewStateRef.current.baseScale.copy(objectRef.current.scale);
+      previewStateRef.current.baseCameraPosition.copy(cameraRef.current.position);
+      previewStateRef.current.startTimeMs = performance.now();
+      previewStateRef.current.baseCaptured = true;
+    }
+  }, [isPreviewPlaying]);
+
+  useEffect(() => {
+    if (!objectRef.current || !cameraRef.current) return;
+
+    const base = previewStateRef.current;
+    base.startTimeMs = performance.now();
+
+    if (base.baseCaptured) {
+      objectRef.current.rotation.copy(base.baseRotation);
+      objectRef.current.position.copy(base.basePosition);
+      objectRef.current.scale.copy(base.baseScale);
+      cameraRef.current.position.copy(base.baseCameraPosition);
+      cameraRef.current.lookAt(
+        cameraControlRef.current.targetX,
+        cameraControlRef.current.targetY,
+        cameraControlRef.current.targetZ
+      );
+    }
+  }, [previewResetToken]);
+
+  // Update background color
+  useEffect(() => {
+    if (sceneRef.current) {
+      sceneRef.current.background = new THREE.Color(backgroundColor);
+    }
+  }, [backgroundColor]);
+
+  // Update object when settings change
+  useEffect(() => {
+    if (sceneRef.current && objectRef.current) {
+      const previousObject = objectRef.current;
+      const previousCamera = cameraRef.current;
+      if (previousObject && previousCamera && previewPlayingRef.current) {
+        previewStateRef.current.baseRotation.copy(previousObject.rotation);
+        previewStateRef.current.basePosition.copy(previousObject.position);
+        previewStateRef.current.baseScale.copy(previousObject.scale);
+        previewStateRef.current.baseCameraPosition.copy(previousCamera.position);
+      }
+
+      sceneRef.current.remove(objectRef.current);
+      objectRef.current.geometry.dispose();
+      if (Array.isArray(objectRef.current.material)) {
+        objectRef.current.material.forEach(m => m.dispose());
+      } else {
+        objectRef.current.material.dispose();
+      }
+      createObject(sceneRef.current, animatorObject);
+    }
+  }, [animatorObject]);
+
+  // Update lighting when settings change
+  useEffect(() => {
+    if (sceneRef.current) {
+      // Remove old lights
+      const lights = sceneRef.current.children.filter(
+        child => child instanceof THREE.Light
+      );
+      lights.forEach(light => sceneRef.current!.remove(light));
+      
+      // Add new lights
+      setupLighting(sceneRef.current, lighting);
+    }
+  }, [lighting]);
+
+  // Handle rendering
+  useEffect(() => {
+    if (isRendering && !renderRequestRef.current.isRendering) {
+      startRendering();
+    }
+  }, [isRendering]);
+
+  const setupLighting = (scene: THREE.Scene, lightSettings: AnimatorLightSettings) => {
+    // Ambient light
+    const ambient = new THREE.AmbientLight(
+      lightSettings.ambientColor, 
+      lightSettings.ambientIntensity
+    );
+    scene.add(ambient);
+
+    // Directional lights
+    lightSettings.directionalLights.forEach(lightData => {
+      const light = new THREE.DirectionalLight(lightData.color, lightData.intensity);
+      light.position.set(lightData.position.x, lightData.position.y, lightData.position.z);
+      light.castShadow = lightData.castShadow;
+      if (lightData.castShadow) {
+        light.shadow.mapSize.width = 2048;
+        light.shadow.mapSize.height = 2048;
+      }
+      scene.add(light);
+    });
+
+    // Point lights
+    lightSettings.pointLights.forEach(lightData => {
+      const light = new THREE.PointLight(
+        lightData.color, 
+        lightData.intensity, 
+        lightData.distance
+      );
+      light.position.set(lightData.position.x, lightData.position.y, lightData.position.z);
+      light.castShadow = lightData.castShadow;
+      scene.add(light);
+    });
+  };
+
+  const createObject = (scene: THREE.Scene, objData: AnimatorObject) => {
+    let geometry: THREE.BufferGeometry;
+    const params = objData.geometryParams;
+
+    const applyCylinderEdgeBevel = (
+      targetGeometry: THREE.BufferGeometry,
+      radiusTop: number,
+      radiusBottom: number,
+      height: number,
+      edgeBevel: number
+    ) => {
+      const bevel = Math.max(0, Math.min(0.25, edgeBevel));
+      if (bevel <= 0) return;
+
+      const position = targetGeometry.getAttribute('position');
+      if (!position) return;
+
+      const minRadius = Math.max(0.001, Math.min(radiusTop, radiusBottom));
+      const bevelHeight = Math.max(0.001, height * bevel);
+      const bevelInset = Math.min(minRadius * 0.6, minRadius * bevel * 0.9);
+      const halfHeight = height / 2;
+
+      for (let i = 0; i < position.count; i++) {
+        const x = position.getX(i);
+        const y = position.getY(i);
+        const z = position.getZ(i);
+
+        const radial = Math.sqrt(x * x + z * z);
+        if (radial <= 0.00001) continue;
+
+        const distToTop = Math.abs(halfHeight - y);
+        const distToBottom = Math.abs(y + halfHeight);
+        const edgeDist = Math.min(distToTop, distToBottom);
+        if (edgeDist > bevelHeight) continue;
+
+        const t = 1 - edgeDist / bevelHeight;
+        const smooth = t * t * (3 - 2 * t);
+        const inset = bevelInset * smooth;
+        const targetRadius = Math.max(0.00001, radial - inset);
+        const scale = targetRadius / radial;
+
+        position.setX(i, x * scale);
+        position.setZ(i, z * scale);
+      }
+
+      position.needsUpdate = true;
+      targetGeometry.computeVertexNormals();
+    };
+
+    switch (objData.geometry) {
+      case 'cylinder':
+        {
+          const radiusTop = params.radiusTop ?? 50;
+          const radiusBottom = params.radiusBottom ?? 50;
+          const height = params.height ?? 100;
+          const radialSegments = params.radialSegments ?? 32;
+
+          geometry = new THREE.CylinderGeometry(
+            radiusTop,
+            radiusBottom,
+            height,
+            radialSegments,
+            8
+          );
+          applyCylinderEdgeBevel(geometry, radiusTop, radiusBottom, height, params.edgeBevel ?? 0);
+        }
+        break;
+      case 'sphere':
+        geometry = new THREE.SphereGeometry(
+          params.radius ?? 50,
+          params.widthSegments ?? 32,
+          params.heightSegments ?? 32
+        );
+        break;
+      case 'cube':
+        geometry = new THREE.BoxGeometry(
+          params.width ?? 100,
+          params.height ?? 100,
+          params.depth ?? 100
+        );
+        break;
+      case 'plane':
+        geometry = new THREE.PlaneGeometry(
+          params.width ?? 100,
+          params.height ?? 100
+        );
+        break;
+      case 'torus':
+        geometry = new THREE.TorusGeometry(
+          params.radius ?? 50,
+          params.tubeRadius ?? 20,
+          params.radialSegments ?? 16,
+          params.tubularSegments ?? 100
+        );
+        break;
+      default:
+        geometry = new THREE.CylinderGeometry(50, 50, 100, 32);
+    }
+
+    // Create cap material (face/top/bottom)
+    const capMaterialOptions: THREE.MeshStandardMaterialParameters = {
+      color: objData.material.color,
+      metalness: objData.material.metalness,
+      roughness: objData.material.roughness,
+      emissive: objData.material.emissive,
+      emissiveIntensity: objData.material.emissiveIntensity,
+    };
+
+    // Load textures if available
+    const textureLoader = new THREE.TextureLoader();
+    const applyUvProjection = (
+      texture: THREE.Texture,
+      projection: {
+        scaleX: number;
+        scaleY: number;
+        offsetX: number;
+        offsetY: number;
+        rotationDeg: number;
+      }
+    ) => {
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.RepeatWrapping;
+      texture.repeat.set(projection.scaleX, projection.scaleY);
+      texture.offset.set(projection.offsetX, projection.offsetY);
+      texture.center.set(0.5, 0.5);
+      texture.rotation = (projection.rotationDeg * Math.PI) / 180;
+    };
+
+    const capProjection = {
+      scaleX: objData.material.uvScaleX,
+      scaleY: objData.material.uvScaleY,
+      offsetX: objData.material.uvOffsetX,
+      offsetY: objData.material.uvOffsetY,
+      rotationDeg: objData.material.uvRotation,
+    };
+
+    const sideProjection = {
+      scaleX: objData.material.sideUvScaleX,
+      scaleY: objData.material.sideUvScaleY,
+      offsetX: objData.material.sideUvOffsetX,
+      offsetY: objData.material.sideUvOffsetY,
+      rotationDeg: objData.material.sideUvRotation,
+    };
+    
+    if (objData.material.baseTextureDataUrl) {
+      const texture = textureLoader.load(objData.material.baseTextureDataUrl);
+      applyUvProjection(texture, capProjection);
+      capMaterialOptions.map = texture;
+    }
+
+    if (objData.material.normalMapDataUrl) {
+      const normalMap = textureLoader.load(objData.material.normalMapDataUrl);
+      applyUvProjection(normalMap, capProjection);
+      capMaterialOptions.normalMap = normalMap;
+    }
+
+    if (objData.material.bumpMapDataUrl) {
+      const bumpMap = textureLoader.load(objData.material.bumpMapDataUrl);
+      applyUvProjection(bumpMap, capProjection);
+      capMaterialOptions.bumpMap = bumpMap;
+      capMaterialOptions.bumpScale = objData.material.bumpScale;
+    }
+
+    let mesh: THREE.Mesh;
+    if (objData.geometry === 'cylinder' && objData.material.useSeparateSideMaterial) {
+      const sideMaterialOptions: THREE.MeshStandardMaterialParameters = {
+        color: objData.material.sideColor,
+        metalness: objData.material.metalness,
+        roughness: objData.material.roughness,
+        emissive: objData.material.emissive,
+        emissiveIntensity: objData.material.emissiveIntensity,
+      };
+
+      if (objData.material.sideNormalMapDataUrl) {
+        const sideNormalMap = textureLoader.load(objData.material.sideNormalMapDataUrl);
+        applyUvProjection(sideNormalMap, sideProjection);
+        sideMaterialOptions.normalMap = sideNormalMap;
+      }
+
+      if (objData.material.sideBumpMapDataUrl) {
+        const sideBumpMap = textureLoader.load(objData.material.sideBumpMapDataUrl);
+        applyUvProjection(sideBumpMap, sideProjection);
+        sideMaterialOptions.bumpMap = sideBumpMap;
+        sideMaterialOptions.bumpScale = objData.material.sideBumpScale;
+      }
+
+      const sideMaterial = new THREE.MeshStandardMaterial(sideMaterialOptions);
+      const capMaterial = new THREE.MeshStandardMaterial(capMaterialOptions);
+      mesh = new THREE.Mesh(geometry, [sideMaterial, capMaterial, capMaterial]);
+    } else {
+      const material = new THREE.MeshStandardMaterial(capMaterialOptions);
+      mesh = new THREE.Mesh(geometry, material);
+    }
+
+    mesh.position.set(objData.position.x, objData.position.y, objData.position.z);
+    mesh.rotation.set(objData.rotation.x, objData.rotation.y, objData.rotation.z);
+    mesh.scale.set(objData.scale.x, objData.scale.y, objData.scale.z);
+    
+    if (renderSettings.shadows) {
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+    }
+
+    scene.add(mesh);
+    objectRef.current = mesh;
+  };
+
+  const startRendering = async () => {
+    if (!sceneRef.current || !cameraRef.current || !rendererRef.current || !objectRef.current) {
+      return;
+    }
+
+    // Small delay to ensure textures load and scene is ready
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    renderRequestRef.current = {
+      isRendering: true,
+      currentFrame: 0,
+      frames: [],
+    };
+
+    const scene = sceneRef.current;
+    const camera = cameraRef.current;
+    const renderer = rendererRef.current;
+    const object = objectRef.current;
+
+    if (!scene.children.includes(object)) {
+      scene.add(object);
+    }
+    object.visible = true;
+
+    // Store initial state
+    const initialRotation = { ...object.rotation };
+    const initialPosition = { ...object.position };
+    const initialScale = { ...object.scale };
+    const initialCameraPosition = { ...camera.position };
+    const initialCameraNear = camera.near;
+    const initialCameraFar = camera.far;
+    const initialSceneBackground = scene.background;
+    const initialRendererSize = renderer.getSize(new THREE.Vector2());
+
+    // Configure renderer for output
+    renderer.setSize(renderSettings.width, renderSettings.height);
+    if (composerRef.current) {
+      composerRef.current.setSize(renderSettings.width, renderSettings.height);
+    }
+
+    fitCameraForRender(camera, object);
+    
+    // Set transparent background for rendering
+    if (renderSettings.transparent) {
+      scene.background = null;
+    }
+
+    const totalFrames = animation.duration;
+    const frames: Blob[] = [];
+
+    // Render each frame
+    for (let frame = 0; frame < totalFrames; frame++) {
+      // Update object transformation
+      const progress = frame / totalFrames;
+      
+      // Rotation (cumulative)
+      object.rotation.x = initialRotation.x + (animation.rotation.x * Math.PI / 180) * frame;
+      object.rotation.y = initialRotation.y + (animation.rotation.y * Math.PI / 180) * frame;
+      object.rotation.z = initialRotation.z + (animation.rotation.z * Math.PI / 180) * frame;
+
+      // Position (cumulative)
+      object.position.x = initialPosition.x + animation.position.x * frame;
+      object.position.y = initialPosition.y + animation.position.y * frame;
+      object.position.z = initialPosition.z + animation.position.z * frame;
+
+      // Scale (lerp from initial to target)
+      object.scale.x = initialScale.x * (1 + (animation.scale.x - 1) * progress);
+      object.scale.y = initialScale.y * (1 + (animation.scale.y - 1) * progress);
+      object.scale.z = initialScale.z * (1 + (animation.scale.z - 1) * progress);
+
+      // Camera animation
+      if (animation.cameraPath === 'orbit') {
+        const angle = (animation.cameraStartAngle + animation.cameraOrbitSpeed * frame) * Math.PI / 180;
+        const radius = Math.sqrt(
+          initialCameraPosition.x ** 2 + 
+          initialCameraPosition.y ** 2 + 
+          initialCameraPosition.z ** 2
+        );
+        camera.position.x = Math.cos(angle) * radius;
+        camera.position.z = Math.sin(angle) * radius;
+        camera.lookAt(object.position);
+      } else {
+        // For static or other paths, always look at the object
+        camera.lookAt(object.position);
+      }
+
+      // Update camera aspect ratio for output size
+      camera.aspect = renderSettings.width / renderSettings.height;
+      camera.updateProjectionMatrix();
+
+      updateEffectDynamics(frame / Math.max(1, animation.fps));
+
+      // Render frame
+      renderSceneFrame(false, false);
+
+      // Capture frame with alpha for transparency
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        renderer.domElement.toBlob((b) => {
+          if (b) resolve(b);
+          else reject(new Error('Failed to capture frame'));
+        }, `image/${renderSettings.outputFormat}`, renderSettings.outputQuality);
+      });
+
+      frames.push(blob);
+      renderRequestRef.current.currentFrame = frame + 1;
+      renderRequestRef.current.frames = frames;
+
+      // Report progress
+      if (onRenderProgress) {
+        onRenderProgress({
+          currentFrame: frame + 1,
+          totalFrames,
+          isRendering: true,
+          renderedFrames: frames,
+        });
+      }
+
+      // Allow UI to update
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+
+    // Restore initial state
+    object.rotation.set(initialRotation.x, initialRotation.y, initialRotation.z);
+    object.position.set(initialPosition.x, initialPosition.y, initialPosition.z);
+    object.scale.set(initialScale.x, initialScale.y, initialScale.z);
+    camera.position.set(initialCameraPosition.x, initialCameraPosition.y, initialCameraPosition.z);
+    camera.near = initialCameraNear;
+    camera.far = initialCameraFar;
+    camera.lookAt(0, 0, 0);
+    
+    // Restore renderer and scene
+    scene.background = initialSceneBackground;
+    renderer.setSize(initialRendererSize.x, initialRendererSize.y);
+    if (composerRef.current) {
+      composerRef.current.setSize(initialRendererSize.x, initialRendererSize.y);
+    }
+    if (containerRef.current) {
+      camera.aspect = containerRef.current.clientWidth / containerRef.current.clientHeight;
+      camera.updateProjectionMatrix();
+    }
+    
+    renderRequestRef.current.isRendering = false;
+
+    // Report completion
+    if (onRenderComplete) {
+      onRenderComplete(frames);
+    }
+    if (onRenderProgress) {
+      onRenderProgress({
+        currentFrame: totalFrames,
+        totalFrames,
+        isRendering: false,
+        renderedFrames: frames,
+      });
+    }
+  };
+
+  return (
+    <div 
+      ref={containerRef} 
+      style={{ 
+        width: '100%', 
+        height: '100%',
+        position: 'relative',
+      }}
+    >
+      {/* Camera Control Hint */}
+      <div style={{
+        position: 'absolute',
+        bottom: '12px',
+        left: '12px',
+        backgroundColor: 'rgba(0, 0, 0, 0.7)',
+        color: '#fff',
+        padding: '8px 12px',
+        borderRadius: '4px',
+        fontSize: '11px',
+        fontFamily: 'monospace',
+        pointerEvents: 'none',
+        userSelect: 'none',
+      }}>
+        <div>🖱️ Left Click + Drag: Rotate</div>
+        <div>🖱️ Right Click + Drag: Pan</div>
+        <div>🖱️ Scroll: Zoom</div>
+      </div>
+    </div>
+  );
+}
