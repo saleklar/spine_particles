@@ -61,6 +61,7 @@ type ParticleVisualType = 'dots' | 'stars' | 'circles' | 'glow-circles' | 'sprit
 
 export interface Scene3DRef {
   exportSpineData: () => any;
+  getParticleTextureBlob: () => Promise<Blob | null>;
 }
 
 export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneSettings, snapSettings, viewMode, onViewModeChange, sceneObjects, currentFrame, isPlaying, isCaching, physicsForces, selectedObjectId, selectedForceId, onObjectSelect, onForceSelect, onObjectTransform, onForceTransform, handleScale = 1.0, onCacheFrameCountChange, cacheResetToken = 0 }, ref) => {
@@ -3373,12 +3374,39 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
   }, [onViewModeChange]);
 
   useImperativeHandle(ref, () => ({
+    getParticleTextureBlob: async () => {
+        // Generate a generic particle sprite data url
+        return new Promise<Blob | null>((resolve) => {
+            const size = 64;
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return resolve(null);
+            
+            ctx.clearRect(0, 0, size, size);
+            const center = size / 2;
+            const radius = size * 0.4;
+            
+            const gradient = ctx.createRadialGradient(center, center, 0, center, center, radius * 1.2);
+            gradient.addColorStop(0, 'rgba(255,255,255,1)');
+            gradient.addColorStop(0.25, 'rgba(255,255,255,0.95)');
+            gradient.addColorStop(0.6, 'rgba(255,255,255,0.5)');
+            gradient.addColorStop(1, 'rgba(255,255,255,0)');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, size, size);
+            
+            canvas.toBlob((blob) => {
+                resolve(blob);
+            }, 'image/png');
+        });
+    },
     exportSpineData: () => {
       // Gather data across all cached frames
       const spineData = {
         skeleton: {
           hash: "particle-export",
-          spine: "4.1.00",
+          spine: "4.2.43",
           x: -sceneSize.x / 2,
           y: -sceneSize.y / 2,
           width: sceneSize.x,
@@ -3420,7 +3448,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
         skinAttachments[slotName] = { "particle": { type: "region", name: "particle", width: 64, height: 64 } };
 
         const boneAnim = { translate: [] as any[], scale: [] as any[] };
-        const slotAnim = { color: [] as any[] };
+        const slotAnim = { rgba: [] as any[] };
 
         // For determining gaps where particle is dead/reborn
         let lastFrame = -2;
@@ -3430,8 +3458,8 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
           
           if (frame > lastFrame + 1 && lastFrame !== -2) {
              // It was dead, zero out old and new frame
-             slotAnim.color.push({ time: (lastFrame + 1) / 24, color: "ffffff00" });
-             slotAnim.color.push({ time: (frame - 0.01) / 24, color: "ffffff00" });
+             slotAnim.rgba.push({ time: (lastFrame + 1) / 24, color: "ffffff00" });
+             slotAnim.rgba.push({ time: (frame - 0.01) / 24, color: "ffffff00" });
           }
 
           // Use age/lifetime to fade out gracefully
@@ -3439,7 +3467,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
           const baseAlpha = Math.max(0, Math.min(1, state.opacity));
           const finalAlpha = Math.floor(alphaFade * baseAlpha * 255).toString(16).padStart(2, '0');
           
-          slotAnim.color.push({ time, color: `ffffff${finalAlpha}` });
+          slotAnim.rgba.push({ time, color: `ffffff${finalAlpha}` });
 
           boneAnim.translate.push({
              time,

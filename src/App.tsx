@@ -199,13 +199,15 @@ export function App() {
   const [draftSize, setDraftSize] = useState<SceneSize>(DEFAULT_SCENE_SIZE);
   const scene3DRef = useRef<Scene3DRef>(null);
 
-  const handleExportSpine = () => {
+  const handleExportSpine = async () => {
     if (!scene3DRef.current) return;
     const spineData = scene3DRef.current.exportSpineData();
     if (!spineData) {
       alert("No particle cache data available. Please play the animation to cache frames first.");
       return;
     }
+    
+    // Download JSON
     const jsonString = JSON.stringify(spineData, null, 2);
     const blob = new Blob([jsonString], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -214,6 +216,17 @@ export function App() {
     a.download = 'particle_export_spine.json';
     a.click();
     URL.revokeObjectURL(url);
+    
+    // Download texture image
+    const imageBlob = await scene3DRef.current.getParticleTextureBlob();
+    if (imageBlob) {
+      const imgUrl = URL.createObjectURL(imageBlob);
+      const imgA = document.createElement('a');
+      imgA.href = imgUrl;
+      imgA.download = 'particle.png';
+      imgA.click();
+      URL.revokeObjectURL(imgUrl);
+    }
   };
   const [sceneSize, setSceneSize] = useState<SceneSize>(DEFAULT_SCENE_SIZE);
   const [sceneSettings, setSceneSettings] = useState<SceneSettings>(DEFAULT_SCENE_SETTINGS);
