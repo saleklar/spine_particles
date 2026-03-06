@@ -377,13 +377,15 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
     const stats = new Stats();
     stats.dom.style.position = 'absolute';
     stats.dom.style.top = '10px';
-    stats.dom.style.left = '10px';
+    stats.dom.style.right = '10px';
+    stats.dom.style.left = '';
     containerRef.current.appendChild(stats.dom);
 
     const statsDisplay = document.createElement('div');
     statsDisplay.style.position = 'absolute';
     statsDisplay.style.top = '60px';
-    statsDisplay.style.left = '10px';
+    statsDisplay.style.right = '10px';
+    statsDisplay.style.left = '';
     statsDisplay.style.color = '#0f0';
     statsDisplay.style.backgroundColor = 'rgba(0,0,0,0.7)';
     statsDisplay.style.padding = '4px 8px';
@@ -3472,11 +3474,10 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
           boneAnim.translate.push({
              time,
              // Map Three.js Y-up coordinates to Spine coordinates, scaling by arbitrary factor or exact scene sizing
-             x: state.position.x,
-             y: state.position.y
+             x: state.position.x * 10, y: state.position.y * 10
           });
           
-          const sizeScale = state.size / 10; // arbitrary base size ratio
+          const sizeScale = Math.max(0.05, state.size * 4) / 64; // arbitrary base size ratio
           boneAnim.scale.push({
              time,
              x: sizeScale,
