@@ -12,7 +12,7 @@ type SceneSize = {
 
 type SceneSettings = {
   particleType?: string;
-  glowEnabled?: boolean;
+  customGlow?: boolean;
   backgroundColor: string;
   gridOpacity: number;
   zoomSpeed: number;
@@ -70,6 +70,7 @@ type ParticleVisualType = 'dots' | 'stars' | 'circles' | 'glow-circles' | 'sprit
 export interface Scene3DRef {
   exportSpineData: () => any;
   getParticleTextureBlob: () => Promise<Blob | null>;
+  getExportAssets: () => Promise<Array<{ name: string, blob: Blob }>>;
 }
 
 export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneSettings, snapSettings, viewMode, onViewModeChange, sceneObjects, currentFrame, isPlaying, isCaching, physicsForces, selectedObjectId, selectedForceId, onObjectSelect, onForceSelect, onObjectTransform, onForceTransform, handleScale = 1.0, onCacheFrameCountChange, cacheResetToken = 0, onUpdateSceneSettings }, ref) => {
@@ -132,7 +133,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
       baseSize?: number;
       sizeMultiplier?: number;
       particleType?: ParticleVisualType;
-      glowEnabled?: boolean;
+      customGlow?: boolean;
       rotation?: number;
       rotationOffset?: number;
       rotationVariation?: number;
@@ -1202,9 +1203,9 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
         activeCamera.lookAt(lookAtPos);
       }
 
-      const getParticleTexture = (particleType: ParticleVisualType, glowEnabled: boolean) => {
-        const textureType = particleType === 'dots' && !glowEnabled ? 'circles' : particleType;
-        const key = `${textureType}:${glowEnabled ? '1' : '0'}`;
+      const getParticleTexture = (particleType: ParticleVisualType, customGlow: boolean) => {
+        const textureType = particleType === 'dots' && !customGlow ? 'circles' : particleType;
+        const key = `${textureType}:${customGlow ? '1' : '0'}`;
         const cached = particleTextureCache.get(key);
         if (cached) {
           return cached;
@@ -1230,20 +1231,48 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
         };
 
         if (textureType === 'stars') {
-          const starRadiusOuter = radius;
-          const starRadiusInner = radius * 0.45;
+          const makeFlare = () => {
+            const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, radius);
+            grad.addColorStop(0, 'rgba(255,255,255,1)');
+            grad.addColorStop(0.2, 'rgba(255,255,255,0.8)');
+            grad.addColorStop(0.5, 'rgba(255,255,255,0.2)');
+            grad.addColorStop(1, 'rgba(255,255,255,0)');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(0, 0, radius, 0, Math.PI * 2);
+            ctx.fill();
+          };
+
+          ctx.save();
+          if (customGlow) ctx.globalCompositeOperation = 'lighter';
+
+          // Vertical flare
+          ctx.save();
+          ctx.translate(center, center);
+          ctx.scale(0.15, 1.0);
+          makeFlare();
+          ctx.restore();
+
+          // Horizontal flare
+          ctx.save();
+          ctx.translate(center, center);
+          ctx.scale(1.0, 0.15);
+          makeFlare();
+          ctx.restore();
+
+          // Core
+          ctx.save();
+          ctx.translate(center, center);
           ctx.beginPath();
-          for (let i = 0; i < 10; i++) {
-            const angle = (Math.PI / 5) * i - Math.PI / 2;
-            const r = i % 2 === 0 ? starRadiusOuter : starRadiusInner;
-            const x = center + Math.cos(angle) * r;
-            const y = center + Math.sin(angle) * r;
-            if (i === 0) ctx.moveTo(x, y);
-            else ctx.lineTo(x, y);
-          }
-          ctx.closePath();
-          ctx.fillStyle = glowEnabled ? makeGlowGradient() : 'rgba(255,255,255,1)';
+          ctx.arc(0, 0, radius * 0.25, 0, Math.PI * 2);
+          const coreGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, radius * 0.25);
+          coreGrad.addColorStop(0, 'rgba(255,255,255,1)');
+          coreGrad.addColorStop(1, 'rgba(255,255,255,0)');
+          ctx.fillStyle = coreGrad;
           ctx.fill();
+          ctx.restore();
+          
+          ctx.restore();
         } else if (textureType === 'sprites') {
           const gradient = ctx.createRadialGradient(center, center, 0, center, center, radius * 1.2);
           gradient.addColorStop(0, 'rgba(255,255,255,1)');
@@ -1259,7 +1288,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
           ctx.fillStyle = makeGlowGradient();
           ctx.fill();
         } else {
-          if (glowEnabled) {
+          if (customGlow) {
             ctx.beginPath();
             ctx.arc(center, center, radius, 0, Math.PI * 2);
             ctx.closePath();
@@ -1336,8 +1365,8 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
         return isWhiteDotPreview ? previewDotSize : size;
       };
 
-      const getPreviewedGlow = (glowEnabled: boolean) => {
-        return isWhiteDotPreview ? false : glowEnabled;
+      const getPreviewedGlow = (customGlow: boolean) => {
+        return isWhiteDotPreview ? false : customGlow;
       };
 
       const getExternalSpriteTexture = (dataUrl: string) => {
@@ -1376,13 +1405,13 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
         size = 3,
         opacity = 1,
         particleType: ParticleVisualType = 'dots',
-        glowEnabled = false,
+        customGlow = false,
         rotation = 0,
         spriteTexture?: THREE.Texture
       ) => {
         const resolvedParticleType = (particleType ?? 'dots') as ParticleVisualType;
-        const shouldUseSprite = resolvedParticleType === 'circles' || resolvedParticleType === 'glow-circles' || resolvedParticleType === 'sprites';
-        const texture = getParticleTexture(resolvedParticleType, glowEnabled);
+        const shouldUseSprite = resolvedParticleType === 'circles' || resolvedParticleType === 'glow-circles' || resolvedParticleType === 'sprites' || resolvedParticleType === 'stars';
+        const texture = getParticleTexture(resolvedParticleType, customGlow);
 
         if (shouldUseSprite) {
           const spriteMaterial = new THREE.SpriteMaterial({
@@ -1390,8 +1419,8 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
             map: resolvedParticleType === 'sprites' && spriteTexture ? spriteTexture : texture,
             transparent: true,
             opacity,
-            depthWrite: !glowEnabled,
-            blending: glowEnabled ? THREE.AdditiveBlending : THREE.NormalBlending,
+            depthWrite: !customGlow,
+            blending: customGlow ? THREE.AdditiveBlending : THREE.NormalBlending,
           });
           const sprite = new THREE.Sprite(spriteMaterial);
           sprite.position.copy(position);
@@ -1412,8 +1441,8 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
           alphaTest: texture ? 0.01 : 0,
           transparent: true,
           opacity,
-          depthWrite: !glowEnabled,
-          blending: glowEnabled ? THREE.AdditiveBlending : THREE.NormalBlending,
+          depthWrite: !customGlow,
+          blending: customGlow ? THREE.AdditiveBlending : THREE.NormalBlending,
         });
 
         const particleMesh = new THREE.Points(particlesGeometry, particlesMaterial);
@@ -1536,7 +1565,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
             lifetime: cached.lifetime,
             age: cached.age,
             particleType: emitterParticleType,
-            glowEnabled: emitterGlow,
+            customGlow: emitterGlow,
             rotation: cached.rotation,
             rotationOffset: 0,
             rotationVariation: 0,
@@ -1879,7 +1908,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
                   baseSize: particleSize,
                   sizeMultiplier: emitterSize > 0 ? (particleSize / emitterSize) : 1,
                   particleType: emitterParticleType,
-                  glowEnabled: emitterGlow,
+                  customGlow: emitterGlow,
                   rotation: particleRotation,
                   rotationOffset: particleRotationOffset,
                   rotationVariation: emitterRotationVariation,
@@ -2095,7 +2124,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
                 particle.baseColor = emitterColor;
                 particle.baseOpacity = emitterOpacity;
                 particle.particleType = emitterParticleType;
-                particle.glowEnabled = emitterGlow;
+                particle.customGlow = emitterGlow;
                 particle.rotationVariation = emitterRotationVariation;
                 particle.rotationSpeedVariation = emitterRotationSpeedVariation;
                 particle.spriteImageDataUrl = emitterSpriteImageDataUrl;
@@ -2116,7 +2145,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
                 particle.rotationSpeed = emitterRotationSpeed * (particle.rotationSpeedMultiplier ?? 1);
 
                 const effectiveParticleType = getPreviewedParticleType(emitterParticleType);
-                const expectedSprite = effectiveParticleType === 'circles' || effectiveParticleType === 'glow-circles' || effectiveParticleType === 'sprites';
+                const expectedSprite = effectiveParticleType === 'circles' || effectiveParticleType === 'glow-circles' || effectiveParticleType === 'sprites' || effectiveParticleType === 'stars';
                 const needsMeshSwap = expectedSprite !== (particle.mesh instanceof THREE.Sprite);
                 const currentEmitterFps = Number(emitterProps.particleSpriteSequenceFps ?? 12);
                 if (needsMeshSwap) {
@@ -3407,10 +3436,10 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
   useImperativeHandle(ref, () => ({
     getParticleTextureBlob: async () => {
         const particleType = sceneSettings.particleType ?? 'dots';
-        const glowEnabled = sceneSettings.glowEnabled ?? false;
+        const customGlow = sceneSettings.customGlow ?? false;
         
         return new Promise<Blob | null>((resolve) => {
-            const textureType = particleType === 'dots' && !glowEnabled ? 'circles' : particleType;
+            const textureType = particleType === 'dots' && !customGlow ? 'circles' : particleType;
             const size = 64;
             const canvas = document.createElement('canvas');
             canvas.width = size;
@@ -3431,20 +3460,48 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
             };
 
             if (textureType === 'stars') {
-              const starRadiusOuter = radius;
-              const starRadiusInner = radius * 0.45;
+              const makeFlare = () => {
+                const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, radius);
+                grad.addColorStop(0, 'rgba(255,255,255,1)');
+                grad.addColorStop(0.2, 'rgba(255,255,255,0.8)');
+                grad.addColorStop(0.5, 'rgba(255,255,255,0.2)');
+                grad.addColorStop(1, 'rgba(255,255,255,0)');
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.arc(0, 0, radius, 0, Math.PI * 2);
+                ctx.fill();
+              };
+
+              ctx.save();
+              if (customGlow) ctx.globalCompositeOperation = 'lighter';
+
+              // Vertical flare
+              ctx.save();
+              ctx.translate(center, center);
+              ctx.scale(0.15, 1.0);
+              makeFlare();
+              ctx.restore();
+
+              // Horizontal flare
+              ctx.save();
+              ctx.translate(center, center);
+              ctx.scale(1.0, 0.15);
+              makeFlare();
+              ctx.restore();
+
+              // Core
+              ctx.save();
+              ctx.translate(center, center);
               ctx.beginPath();
-              for (let i = 0; i < 10; i++) {
-                const angle = (Math.PI / 5) * i - Math.PI / 2;
-                const r = i % 2 === 0 ? starRadiusOuter : starRadiusInner;
-                const x = center + Math.cos(angle) * r;
-                const y = center + Math.sin(angle) * r;
-                if (i === 0) ctx.moveTo(x, y);
-                else ctx.lineTo(x, y);
-              }
-              ctx.closePath();
-              ctx.fillStyle = glowEnabled ? makeGlowGradient() : 'rgba(255,255,255,1)';
+              ctx.arc(0, 0, radius * 0.25, 0, Math.PI * 2);
+              const coreGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, radius * 0.25);
+              coreGrad.addColorStop(0, 'rgba(255,255,255,1)');
+              coreGrad.addColorStop(1, 'rgba(255,255,255,0)');
+              ctx.fillStyle = coreGrad;
               ctx.fill();
+              ctx.restore();
+              
+              ctx.restore();
             } else if (textureType === 'sprites') {
               const gradient = ctx.createRadialGradient(center, center, 0, center, center, radius * 1.2);
               gradient.addColorStop(0, 'rgba(255,255,255,1)');
@@ -3460,7 +3517,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
               ctx.fillStyle = makeGlowGradient();
               ctx.fill();
             } else {
-              if (glowEnabled) {
+              if (customGlow) {
                 ctx.beginPath();
                 ctx.arc(center, center, radius, 0, Math.PI * 2);
                 ctx.closePath();
@@ -3477,6 +3534,159 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
 
             canvas.toBlob((blob) => {
                 resolve(blob);
+            }, 'image/png');
+        });
+    },
+    getExportAssets: async () => {
+        const assets: Array<{name: string, blob: Blob}> = [];
+        let pUrls: string[] = [];
+        let singleUrl: string = '';
+        let hasCustomSequence = false;
+        let hasSingleImage = false;
+        let customParticleType = sceneSettings.particleType ?? 'dots';
+        let customGlow = sceneSettings.customGlow ?? false;
+        
+        for (const obj of sceneObjectsRef.current) {
+            if (obj.type === 'Emitter') {
+                const props = obj.properties as any;
+                if (props?.particleSpriteSequenceDataUrls?.length > 0) {
+                    pUrls = props.particleSpriteSequenceDataUrls;
+                    hasCustomSequence = true;
+                    break;
+                } else if (props?.particleSpriteImageDataUrl) {
+                    singleUrl = props.particleSpriteImageDataUrl;
+                    hasSingleImage = true;
+                    break;
+                }
+                if (props?.particleType) {
+                    customParticleType = props.particleType;
+                    customGlow = props.particleGlow ?? false;
+                }
+            }
+        }
+        
+        if (hasCustomSequence && pUrls.length > 0) {
+            for (let i=0; i<pUrls.length; i++) {
+                try {
+                    const res = await fetch(pUrls[i]);
+                    const blob = await (await fetch(pUrls[i])).blob();
+                    assets.push({ name: `particle${i}.png`, blob });
+                } catch (e) {
+                    console.error("Error fetching blob for sequence frame", i, e);
+                }
+            }
+            return assets;
+        }
+
+        if (hasSingleImage && singleUrl) {
+            try {
+                const res = await fetch(singleUrl);
+                const blob = await res.blob();
+                assets.push({ name: 'particle.png', blob });
+                return assets;
+            } catch(e) {
+                console.error("Error fetching single image blob", e);
+            }
+        }
+
+        // Add standard static texture
+        const textureType = customParticleType === 'dots' && !customGlow ? 'circles' : customParticleType;
+        const size = 64;
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return [];
+
+        ctx.clearRect(0, 0, size, size);
+        const center = size / 2;
+        const radius = size * 0.4;
+
+        const makeGlowGradient = () => {
+            const gradient = ctx.createRadialGradient(center, center, 0, center, center, radius * 1.15);
+            gradient.addColorStop(0, 'rgba(255,255,255,1)');
+            gradient.addColorStop(0.45, 'rgba(255,255,255,0.85)');
+            gradient.addColorStop(1, 'rgba(255,255,255,0)');
+            return gradient;
+        };
+
+        if (textureType === 'stars') {
+            const makeFlare = () => {
+              const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, radius);
+              grad.addColorStop(0, 'rgba(255,255,255,1)');
+              grad.addColorStop(0.2, 'rgba(255,255,255,0.8)');
+              grad.addColorStop(0.5, 'rgba(255,255,255,0.2)');
+              grad.addColorStop(1, 'rgba(255,255,255,0)');
+              ctx.fillStyle = grad;
+              ctx.beginPath();
+              ctx.arc(0, 0, radius, 0, Math.PI * 2);
+              ctx.fill();
+            };
+
+            ctx.save();
+            if (customGlow) ctx.globalCompositeOperation = 'lighter';
+
+            // Vertical flare
+            ctx.save();
+            ctx.translate(center, center);
+            ctx.scale(0.15, 1.0);
+            makeFlare();
+            ctx.restore();
+
+            // Horizontal flare
+            ctx.save();
+            ctx.translate(center, center);
+            ctx.scale(1.0, 0.15);
+            makeFlare();
+            ctx.restore();
+
+            // Core
+            ctx.save();
+            ctx.translate(center, center);
+            ctx.beginPath();
+            ctx.arc(0, 0, radius * 0.25, 0, Math.PI * 2);
+            const coreGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, radius * 0.25);
+            coreGrad.addColorStop(0, 'rgba(255,255,255,1)');
+            coreGrad.addColorStop(1, 'rgba(255,255,255,0)');
+            ctx.fillStyle = coreGrad;
+            ctx.fill();
+            ctx.restore();
+            
+            ctx.restore();
+        } else if (textureType === 'sprites') {
+            const gradient = ctx.createRadialGradient(center, center, 0, center, center, radius * 1.2);
+            gradient.addColorStop(0, 'rgba(255,255,255,1)');
+            gradient.addColorStop(0.25, 'rgba(255,255,255,0.95)');
+            gradient.addColorStop(0.6, 'rgba(255,255,255,0.5)');
+            gradient.addColorStop(1, 'rgba(255,255,255,0)');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, size, size);
+        } else if (textureType === 'glow-circles') {
+            ctx.beginPath();
+            ctx.arc(center, center, radius, 0, Math.PI * 2);
+            ctx.closePath();
+            ctx.fillStyle = makeGlowGradient();
+            ctx.fill();
+        } else {
+            if (customGlow) {
+                ctx.beginPath();
+                ctx.arc(center, center, radius, 0, Math.PI * 2);
+                ctx.closePath();
+                ctx.fillStyle = makeGlowGradient();
+                ctx.fill();
+            } else {
+                ctx.beginPath();
+                ctx.arc(center, center, radius * 0.5, 0, Math.PI * 2);
+                ctx.closePath();
+                ctx.fillStyle = 'rgba(255,255,255,1)';
+                ctx.fill();
+            }
+        }
+
+        return new Promise<Array<{name: string, blob: Blob}>>((resolve) => {
+            canvas.toBlob((blob) => {
+                if (blob) assets.push({ name: 'particle.png', blob });
+                resolve(assets);
             }, 'image/png');
         });
     },
@@ -3516,18 +3726,46 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
       // Root bone
       spineData.bones.push({ name: "root" });
 
+      // Cache emitter sequence info
+      const emitterSequences = new Map<string, { count: number, fps: number }>();
+      sceneObjectsRef.current.forEach(obj => {
+          if (obj.type === 'Emitter') {
+              const props = obj.properties as any;
+              const urls = props?.particleSpriteSequenceDataUrls || [];
+              if (urls.length > 0) {
+                  emitterSequences.set(obj.id, { 
+                      count: urls.length, 
+                      fps: props?.particleSpriteSequenceFps || 12 
+                  });
+              }
+          }
+      });
+
       trackData.forEach((history, trackId) => {
         const boneName = `track_${trackId}`;
-        const slotName = `slot_${trackId}`;
+        const slotName = `track_${trackId}_slot`; // Renamed to avoid name collision inside attachments if needed? No, let's keep it slot_${trackId}
+        const realSlotName = `slot_${trackId}`;
         
         spineData.bones.push({ name: boneName, parent: "root" });
-        spineData.slots.push({ name: slotName, bone: boneName, attachment: "particle" });
+        spineData.slots.push({ name: realSlotName, bone: boneName, attachment: "particle" });
+
+        const firstState = history[0]?.state;
+        const seqInfo = firstState ? emitterSequences.get(firstState.emitterId) : undefined;
 
         const skinAttachments = spineData.skins[0].attachments as any;
-        skinAttachments[slotName] = { "particle": { type: "region", name: "particle", width: 64, height: 64 } };
+        if (seqInfo && seqInfo.count > 0) {
+            skinAttachments[realSlotName] = { 
+                "particle": { type: "region", name: "particle", width: 64, height: 64, sequence: { count: seqInfo.count, start: 0, digits: 0 } }
+            };
+        } else {
+            skinAttachments[realSlotName] = { "particle": { type: "region", name: "particle", width: 64, height: 64 } };
+        }
 
         const boneAnim = { translate: [] as any[], scale: [] as any[] };
-        const slotAnim = { rgba: [] as any[] };
+        const slotAnim: any = { rgba: [] as any[] };
+        if (seqInfo && seqInfo.count > 0) {
+            slotAnim.sequence = [] as any[];
+        }
 
         // Chunk history into contiguous life segments
           const lifespans = [];
@@ -3553,6 +3791,15 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
             if (i > 0 || life[0].frame > 0) {
               slotAnim.rgba.push({ time: (life[0].frame - 1) / 24, color: 'ffffff00' });
             }
+            
+            if (seqInfo && seqInfo.count > 0) {
+                slotAnim.sequence.push({
+                   time: life[0].frame / 24,
+                   mode: "loop",
+                   index: 0,
+                   delay: 1 / seqInfo.fps
+                });
+            }
 
             // Exactly 4 keys distributed evenly
             const maxKeys = 4;
@@ -3574,18 +3821,19 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
               const baseAlpha = Math.max(0, Math.min(1, state.opacity));
               const finalAlpha = Math.floor(alphaFade * baseAlpha * 255).toString(16).padStart(2, '0');
               
+              // Since `stepped` was crashing, let's explicitly inject `curve: "linear"` AGAIN just in case
+              // But ONLY for the properties that can take curves. Alpha/RGB usually does too, 
+              // but maybe Spine expects numbers or explicit strings specifically?
               const isLastKey = k === bakedKeys.length - 1;
-              let translateCurve = !isLastKey ? { curve: [0.333, 0, 0.667, 1] as any } : {};
-let scaleCurve = !isLastKey ? { curve: [0.333, 0, 0.667, 1] as any } : {};
-let rgbaCurve = !isLastKey ? { curve: [0.333, 0, 0.667, 1] as any } : {};
-
-              slotAnim.rgba.push({ time, color: `ffffff${finalAlpha}`, ...rgbaCurve });
+              const curveDefinition = !isLastKey ? { curve: "linear" } : {};
+              
+              slotAnim.rgba.push({ time, color: `ffffff${finalAlpha}`, ...curveDefinition });
 
               boneAnim.translate.push({
                  time,
                  x: state.position.x * 10,
                  y: state.position.y * 10,
-                 ...translateCurve
+                 ...curveDefinition
               });
 
               const sizeScale = Math.max(0.05, state.size * 4) / 64;
@@ -3593,7 +3841,7 @@ let rgbaCurve = !isLastKey ? { curve: [0.333, 0, 0.667, 1] as any } : {};
                  time,
                  x: sizeScale,
                  y: sizeScale,
-                 ...scaleCurve
+                 ...curveDefinition
               });
 
               
