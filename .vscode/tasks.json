@@ -1,0 +1,119 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Run run-dev.ps1",
+			"type": "shell",
+			"command": ".\\run-dev.ps1"
+		},
+		{
+			"label": "run dev",
+			"type": "shell",
+			"command": "npm run dev"
+		},
+		{
+			"label": "Kill node and restart",
+			"type": "shell",
+			"command": "Get-Process node -ErrorAction SilentlyContinue | Stop-Process -Force; npm run dev:win"
+		},
+		{
+			"label": "run dev win",
+			"type": "shell",
+			"command": "npm run dev:win"
+		},
+		{
+			"label": "Start Dev Server",
+			"type": "shell",
+			"command": "powershell -ExecutionPolicy Bypass -File .\\run-dev.ps1",
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Dev",
+			"type": "shell",
+			"command": "npm run dev",
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Build",
+			"type": "shell",
+			"command": "npm run build",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Build2",
+			"type": "shell",
+			"command": "npm run build",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Run Electron",
+			"type": "shell",
+			"command": "electron .",
+			"isBackground": false
+		},
+		{
+			"label": "Run Electron Local",
+			"type": "shell",
+			"command": "npx electron .",
+			"isBackground": false
+		},
+		{
+			"label": "Run Electron No GPU",
+			"type": "shell",
+			"command": "npx electron . --disable-gpu --no-sandbox",
+			"isBackground": false
+		},
+		{
+			"label": "Kill Electron",
+			"type": "shell",
+			"command": "taskkill /F /IM electron.exe /T",
+			"isBackground": false
+		},
+		{
+			"label": "Run Electron After Kill",
+			"type": "shell",
+			"command": "npx electron .",
+			"isBackground": true
+		},
+		{
+			"label": "Run App",
+			"type": "shell",
+			"command": "npm run dev:win",
+			"isBackground": true
+		},
+		{
+			"label": "Test Build",
+			"type": "shell",
+			"command": "npm run build",
+			"isBackground": false
+		},
+		{
+			"label": "npm run build",
+			"type": "shell",
+			"command": "npm run build",
+			"isBackground": false
+		},
+		{
+			"label": "git status",
+			"type": "shell",
+			"command": "git status",
+			"isBackground": false
+		},
+		{
+			"label": "git commit and push",
+			"type": "shell",
+			"command": "git add . && git commit -m \"Backup version with Color Correction and improved Bump Maps\" && git push",
+			"isBackground": false
+		},
+		{
+			"label": "git backup",
+			"type": "shell",
+			"command": "git add . ; git commit -m 'Backup' ; git push",
+			"isBackground": false
+		}
+	]
+}

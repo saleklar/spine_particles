@@ -86,6 +86,7 @@ export type EmitterObject = SceneObject & {
     particleSpriteImageName?: string;
     particleSpriteSequenceDataUrls?: string[];
     particleSpriteSequenceFirstName?: string;
+    particleSpriteSequenceFps?: number;
     particleSpeedVariation: number;
     particleLifetimeVariation: number;
     particleSizeVariation: number;
@@ -478,12 +479,19 @@ export function App() {
       const dataUrls = await Promise.all(files.map((file) => readFileAsDataUrl(file)));
       handleUpdateEmitterProperty('particleSpriteSequenceDataUrls', dataUrls);
       handleUpdateEmitterProperty('particleSpriteSequenceFirstName', files[0].name);
+      
+      // Keep existing FPS or initialize default
+      const currentProps = sceneObjects.find(obj => obj.id === selectedObjectId)?.properties as EmitterObject['properties'] | undefined;
+      if (!currentProps?.particleSpriteSequenceFps) {
+        handleUpdateEmitterProperty('particleSpriteSequenceFps', 12);
+      }
+      
       handleUpdateEmitterProperty('particleSpriteImageDataUrl', '');
       handleUpdateEmitterProperty('particleSpriteImageName', '');
     } catch {
       // Ignore read errors to keep UI responsive
     }
-  }, [selectedObjectId, readFileAsDataUrl, handleUpdateEmitterProperty]);
+  }, [selectedObjectId, sceneObjects, readFileAsDataUrl, handleUpdateEmitterProperty]);
 
   const handleObjectTransform = useCallback((
     objectId: string, 
@@ -647,6 +655,7 @@ export function App() {
         ? ((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleSpriteSequenceDataUrls as string[])
         : [],
       particleSpriteSequenceFirstName: String((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleSpriteSequenceFirstName ?? ''),
+      particleSpriteSequenceFps: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleSpriteSequenceFps ?? 12),
       particleSpeedVariation: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleSpeedVariation ?? 0.2),
       particleLifetimeVariation: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleLifetimeVariation ?? 0),
       particleSizeVariation: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleSizeVariation ?? 0),
@@ -926,6 +935,86 @@ export function App() {
     input.click();
     setShowFileMenu(false);
   }, [addRecentFileEntry, applySceneData]);
+
+  const handleExportToParticleSystem = useCallback((dataUrls: string[]) => {
+    setAppMode('particle-system');
+    
+    // Find either selected Emitter or first Emitter
+    let targetId = selectedObjectId;
+    let target = sceneObjects.find(obj => obj.id === targetId && obj.type === 'Emitter');
+    if (!target) {
+      target = sceneObjects.find(obj => obj.type === 'Emitter');
+      if (target) {
+        targetId = target.id;
+      }
+    }
+
+    if (target) {
+      setSceneObjects(prev => prev.map(obj => {
+        if (obj.id === target?.id) {
+          return {
+            ...obj,
+            properties: {
+              ...(obj.properties as any),
+              particleType: 'sprites',
+              particleSpriteSequenceDataUrls: dataUrls,
+              particleSpriteSequenceFirstName: 'Rendered Animation',
+              particleSpriteSequenceFps: 24,
+              particleSpriteSequenceWaitFrames: 0,
+            }
+          };
+        }
+        return obj;
+      }));
+      setSelectedObjectId(target.id);
+    } else {
+      // Create new Emitter
+      const newObject: SceneObject = {
+        id: `Emitter_${Date.now()}`,
+        name: 'Animated Sprite Emitter',
+        type: 'Emitter',
+        position: { x: 0, y: 0, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+        parentId: null,
+      };
+      
+      (newObject as EmitterObject).properties = {
+        emissionRate: 5,
+        emitterType: 'point',
+        emissionMode: 'volume',
+        layerImageDataUrl: '',
+        particleLifetime: 3,
+        particleSpeed: 50,
+        particleSpeedVariation: 0.2,
+        particleSize: 5,
+        particleSizeVariation: 0.2,
+        particleColor: '#ffffff',
+        particleColorVariation: 0.1,
+        particleOpacity: 1,
+        particleType: 'sprites',
+        particleGlow: false,
+        particleRotation: 0,
+        particleRotationVariation: 0,
+        particleRotationSpeed: 0,
+        particleRotationSpeedVariation: 0,
+        particleTextureUrl: '',
+        particleTextureName: '',
+        particleSpriteImageDataUrl: '',
+        particleSpriteImageName: '',
+        particleOpacityOverLife: false,
+        particleColorOverLife: false,
+        particleColorOverLifeTarget: '#000000',
+        particleSizeOverLife: 'none',
+        particleSpriteSequenceDataUrls: dataUrls,
+        particleSpriteSequenceFirstName: 'Rendered Animation',
+        particleSpriteSequenceFps: 24,
+      };
+
+      setSceneObjects((prev) => [...prev, newObject]);
+      setSelectedObjectId(newObject.id);
+    }
+  }, [sceneObjects, selectedObjectId]);
 
   const handleCreateObject = useCallback((objectType: string) => {
     const newObject: SceneObject = {
@@ -1644,7 +1733,7 @@ export function App() {
             3D Asset Creator Mode
           </div>
         </div>
-        <Animator3D />
+        <Animator3D onExportToParticleSystem={handleExportToParticleSystem} />
       </div>
     );
   }
@@ -2860,7 +2949,7 @@ export function App() {
                     </button>
 
                     {showEmitterProperties && (
-                      <>
+                      <div className="subpanel-content">
                         <button
                           type="button"
                           className="apply-button"
@@ -2892,7 +2981,7 @@ export function App() {
                         <div className={`transform-slots ${selectedObject.type === 'Emitter' ? 'compact-emitter' : ''}`}>
 
                         </div>
-                      </>
+                      </div>
                     )}
                   </>
                 )}
@@ -2910,7 +2999,7 @@ export function App() {
                     </button>
 
                     {showParentEmitter && (
-                      <>
+                      <div className="subpanel-content">
                         <label htmlFor="parent-emitter">
                           Connect to Emitter
                         </label>
@@ -2938,7 +3027,7 @@ export function App() {
                             ? 'This shape is connected to an emitter and will be used as an emission source.' 
                             : 'Select an emitter to use this shape as an emission source.'}
                         </p>
-                      </>
+                      </div>
                     )}
 
                     <hr style={{ margin: '0.8rem 0', borderColor: '#3b455c' }} />
@@ -2956,7 +3045,7 @@ export function App() {
                 </button>
 
                 {showTransformPosition && (
-                  <>
+                  <div className="subpanel-content">
                     <label htmlFor="position-x">Position X: {selectedObject.position.x.toFixed(1)}</label>
                             <input
                               id="position-x"
@@ -3010,7 +3099,7 @@ export function App() {
                               value={selectedObject.position.z}
                               onChange={(event) => handleUpdateSelectedObjectTransform('position', 'z', Number.parseFloat(event.target.value))}
                             />
-                  </>
+                  </div>
                 )}
 
                 {/* Rotation Transform Section */}
@@ -3024,7 +3113,7 @@ export function App() {
                 </button>
 
                 {showTransformRotation && (
-                  <>
+                  <div className="subpanel-content">
                     <label htmlFor="rotation-x">Rotation X (rad): {selectedObject.rotation.x.toFixed(2)}</label>
                             <input
                               id="rotation-x"
@@ -3078,7 +3167,7 @@ export function App() {
                               value={selectedObject.rotation.z}
                               onChange={(event) => handleUpdateSelectedObjectTransform('rotation', 'z', Number.parseFloat(event.target.value))}
                             />
-                  </>
+                  </div>
                 )}
 
                 {/* Scale Transform Section */}
@@ -3092,7 +3181,7 @@ export function App() {
                 </button>
 
                 {showTransformScale && (
-                  <>
+                  <div className="subpanel-content">
                     <label htmlFor="scale-x">Scale X: {selectedObject.scale.x.toFixed(2)}</label>
                             <input
                               id="scale-x"
@@ -3152,7 +3241,7 @@ export function App() {
                               value={selectedObject.scale.z}
                               onChange={(event) => handleUpdateSelectedObjectTransform('scale', 'z', Math.max(0.05, Number.parseFloat(event.target.value)))}
                             />
-                  </>
+                  </div>
                 )}
 
                 <hr style={{ margin: '0.8rem 0', borderColor: '#3b455c' }} />
@@ -3169,7 +3258,7 @@ export function App() {
                     </button>
 
                     {showEmitterProperties && (
-                      <>
+                      <div className="subpanel-content">
                         <label htmlFor="shape-emitter-type">Shape Type</label>
                         <select
                           id="shape-emitter-type"
@@ -3221,7 +3310,7 @@ export function App() {
                             )}
                           </>
                         )}
-                      </>
+                      </div>
                     )}
                   </>
                 )}
@@ -3238,7 +3327,7 @@ export function App() {
                     </button>
 
                     {showParticleProperties && (
-                      <>
+                      <div className="subpanel-content">
                         <label htmlFor="particle-type">
                           Particle Type
                         </label>
@@ -3285,9 +3374,23 @@ export function App() {
                             />
 
                             {selectedEmitterProperties.particleSpriteSequenceDataUrls.length > 0 && (
-                              <label>
-                                Sprite: {selectedEmitterProperties.particleSpriteSequenceFirstName || 'sequence.png'} (sequence used)
-                              </label>
+                              <>
+                                <label>
+                                  Sprite: {selectedEmitterProperties.particleSpriteSequenceFirstName || 'sequence.png'} (sequence used)
+                                </label>
+                                <label htmlFor="particle-sprite-sequence-fps">
+                                  Sequence FPS: {selectedEmitterProperties.particleSpriteSequenceFps ?? 12}
+                                </label>
+                                <input
+                                  id="particle-sprite-sequence-fps"
+                                  type="range"
+                                  min="1"
+                                  max="60"
+                                  step="1"
+                                  value={selectedEmitterProperties.particleSpriteSequenceFps ?? 12}
+                                  onChange={(e) => handleUpdateEmitterProperty('particleSpriteSequenceFps', Number(e.target.value))}
+                                />
+                              </>
                             )}
 
                             {selectedEmitterProperties.particleSpriteSequenceDataUrls.length === 0 && selectedEmitterProperties.particleSpriteImageName && (
@@ -3568,7 +3671,7 @@ export function App() {
                             </p>
                           </>
                         )}
-                      </>
+                      </div>
                     )}
                   </>
                 )}

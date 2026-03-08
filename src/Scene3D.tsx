@@ -11,12 +11,19 @@ type SceneSize = {
 };
 
 type SceneSettings = {
+  particleType?: string;
+  glowEnabled?: boolean;
   backgroundColor: string;
   gridOpacity: number;
   zoomSpeed: number;
   particlePreviewMode: 'real' | 'white-dots';
   particlePreviewSize: number;
   particleBudget: number;
+  referenceImage?: string | null;
+  referenceOpacity?: number;
+  showGrid?: boolean;
+  showObjects?: boolean;
+  showParticles?: boolean;
 };
 
 const DEFAULT_THETA = Math.PI / 4;
@@ -43,6 +50,7 @@ type Scene3DProps = {
   handleScale?: number;
   onCacheFrameCountChange?: (count: number) => void;
   cacheResetToken?: number;
+  onUpdateSceneSettings?: (settings: Partial<SceneSettings>) => void;
 };
 
 type CachedParticleState = {
@@ -64,7 +72,7 @@ export interface Scene3DRef {
   getParticleTextureBlob: () => Promise<Blob | null>;
 }
 
-export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneSettings, snapSettings, viewMode, onViewModeChange, sceneObjects, currentFrame, isPlaying, isCaching, physicsForces, selectedObjectId, selectedForceId, onObjectSelect, onForceSelect, onObjectTransform, onForceTransform, handleScale = 1.0, onCacheFrameCountChange, cacheResetToken = 0 }, ref) => {
+export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneSettings, snapSettings, viewMode, onViewModeChange, sceneObjects, currentFrame, isPlaying, isCaching, physicsForces, selectedObjectId, selectedForceId, onObjectSelect, onForceSelect, onObjectTransform, onForceTransform, handleScale = 1.0, onCacheFrameCountChange, cacheResetToken = 0, onUpdateSceneSettings }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -368,35 +376,27 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
     const defaultRadius = cameraStateRef.current.radius;
 
     // Renderer setup
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(width, height);
     renderer.setPixelRatio(window.devicePixelRatio);
     containerRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
-    const stats = new Stats();
-    stats.dom.style.position = 'absolute';
-    stats.dom.style.top = '10px';
-    stats.dom.style.right = '10px';
-    stats.dom.style.left = '';
-    containerRef.current.appendChild(stats.dom);
+          const stats = new Stats();
 
-    const statsDisplay = document.createElement('div');
-    statsDisplay.style.position = 'absolute';
-    statsDisplay.style.top = '60px';
-    statsDisplay.style.right = '10px';
-    statsDisplay.style.left = '';
-    statsDisplay.style.color = '#0f0';
-    statsDisplay.style.backgroundColor = 'rgba(0,0,0,0.7)';
-    statsDisplay.style.padding = '4px 8px';
-    statsDisplay.style.fontFamily = 'monospace';
-    statsDisplay.style.fontSize = '12px';
-    statsDisplay.style.borderRadius = '4px';
-    statsDisplay.style.pointerEvents = 'none';
-    statsDisplay.style.zIndex = '1000';
-    statsDisplay.style.border = '1px solid #0f0';
-    statsDisplay.innerText = 'Particles: 0\nEmitters: 0';
-    containerRef.current.appendChild(statsDisplay);
+      const statsDisplay = document.createElement('div');
+      statsDisplay.style.position = 'absolute';
+      statsDisplay.style.top = '10px';
+      statsDisplay.style.right = '10px';
+      statsDisplay.style.color = 'rgba(255, 255, 255, 0.6)';
+      statsDisplay.style.backgroundColor = 'transparent';
+      statsDisplay.style.fontFamily = 'monospace';
+      statsDisplay.style.fontSize = '12px';
+      statsDisplay.style.pointerEvents = 'none';
+      statsDisplay.style.zIndex = '1000';
+      statsDisplay.style.textShadow = '1px 1px 1px #000, -1px -1px 1px #000, 1px -1px 1px #000, -1px 1px 1px #000';
+      statsDisplay.innerText = 'Particles: 0 | Emitters: 0';
+      containerRef.current.appendChild(statsDisplay);
 
     // Transform controls setup
     const transformControls = new TransformControls(camera, renderer.domElement);
@@ -1352,13 +1352,13 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
         return texture;
       };
 
-      const resolveSpriteTexture = (imageDataUrl: string, sequenceDataUrls: string[], age: number) => {
+      const resolveSpriteTexture = (imageDataUrl: string, sequenceDataUrls: string[], age: number, fps: number = 12) => {
         const validSequence = Array.isArray(sequenceDataUrls)
           ? sequenceDataUrls.filter((url) => typeof url === 'string' && url.length > 0)
           : [];
 
         if (validSequence.length > 0) {
-          const sequenceFps = 12;
+          const sequenceFps = fps;
           const frameIndex = Math.floor(Math.max(0, age) * sequenceFps) % validSequence.length;
           return getExternalSpriteTexture(validSequence[frameIndex]);
         }
@@ -1397,6 +1397,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
           sprite.position.copy(position);
           setParticleSize(sprite, size);
           setParticleRotation(sprite, rotation);
+          sprite.visible = sceneSettingsRef.current.showParticles ?? true;
           return sprite;
         }
 
@@ -1418,6 +1419,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
         const particleMesh = new THREE.Points(particlesGeometry, particlesMaterial);
         particleMesh.position.copy(position);
         setParticleRotation(particleMesh, rotation);
+        particleMesh.visible = sceneSettingsRef.current.showParticles ?? true;
         return particleMesh;
       };
 
@@ -1503,9 +1505,12 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
           const emitterSpriteSequenceDataUrls = emitter && emitter.type === 'Emitter' && Array.isArray(emitterProps.particleSpriteSequenceDataUrls)
             ? (emitterProps.particleSpriteSequenceDataUrls as string[])
             : [];
+          const emitterSpriteSequenceFps = emitter && emitter.type === 'Emitter'
+            ? Number(emitterProps.particleSpriteSequenceFps ?? 12)
+            : 12;
           const restoredSpeedMultiplier = 1 - emitterRotationSpeedVariation * 0.5 + Math.random() * emitterRotationSpeedVariation;
           const restoredSpriteTexture = emitterParticleType === 'sprites'
-            ? resolveSpriteTexture(emitterSpriteImageDataUrl, emitterSpriteSequenceDataUrls, cached.age)
+            ? resolveSpriteTexture(emitterSpriteImageDataUrl, emitterSpriteSequenceDataUrls, cached.age, emitterSpriteSequenceFps)
             : undefined;
           const previewedType = getPreviewedParticleType(emitterParticleType);
           const previewedColor = getPreviewedParticleColor(emitterColor);
@@ -1779,6 +1784,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
                 const emitterSpriteSequenceDataUrls = Array.isArray(emitterProps.particleSpriteSequenceDataUrls)
                   ? (emitterProps.particleSpriteSequenceDataUrls as string[])
                   : [];
+                const emitterSpriteSequenceFps = Number(emitterProps.particleSpriteSequenceFps ?? 12);
                 const emitterColorVariation = emitterProps.particleColorVariation ?? 0;
                 const emitterSizeVariation = emitterProps.particleSizeVariation ?? 0;
                 
@@ -1799,7 +1805,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
                 const particleRotationSpeedMultiplier = 1 - emitterRotationSpeedVariation * 0.5 + Math.random() * emitterRotationSpeedVariation;
                 const particleRotationSpeed = emitterRotationSpeed * particleRotationSpeedMultiplier;
                 const spawnSpriteTexture = emitterParticleType === 'sprites'
-                  ? resolveSpriteTexture(emitterSpriteImageDataUrl, emitterSpriteSequenceDataUrls, 0)
+                  ? resolveSpriteTexture(emitterSpriteImageDataUrl, emitterSpriteSequenceDataUrls, 0, emitterSpriteSequenceFps)
                   : undefined;
                 const previewedType = getPreviewedParticleType(emitterParticleType);
                 const previewedColor = getPreviewedParticleColor(particleColor);
@@ -2112,13 +2118,15 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
                 const effectiveParticleType = getPreviewedParticleType(emitterParticleType);
                 const expectedSprite = effectiveParticleType === 'circles' || effectiveParticleType === 'glow-circles' || effectiveParticleType === 'sprites';
                 const needsMeshSwap = expectedSprite !== (particle.mesh instanceof THREE.Sprite);
+                const currentEmitterFps = Number(emitterProps.particleSpriteSequenceFps ?? 12);
                 if (needsMeshSwap) {
                   const existingMaterial = getParticleMaterial(particle.mesh);
                   const replacementSpriteTexture = emitterParticleType === 'sprites'
                     ? resolveSpriteTexture(
                       particle.spriteImageDataUrl ?? '',
                       particle.spriteSequenceDataUrls ?? [],
-                      particle.age
+                      particle.age,
+                      currentEmitterFps
                     )
                     : undefined;
                   const replacementMesh = createParticleMesh(
@@ -2159,7 +2167,8 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
                   const spriteTexture = resolveSpriteTexture(
                     particle.spriteImageDataUrl ?? '',
                     particle.spriteSequenceDataUrls ?? [],
-                    particle.age
+                    particle.age,
+                    currentEmitterFps
                   );
                   if (material.map !== (spriteTexture ?? null)) {
                     material.map = spriteTexture ?? null;
@@ -2315,12 +2324,17 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
 
   useEffect(() => {
     if (!sceneRef.current) return;
-    sceneRef.current.background = new THREE.Color(sceneSettings.backgroundColor);
-  }, [sceneSettings.backgroundColor]);
+    if (sceneSettings.referenceImage) {
+      sceneRef.current.background = null;
+    } else {
+      sceneRef.current.background = new THREE.Color(sceneSettings.backgroundColor);
+    }
+  }, [sceneSettings.backgroundColor, sceneSettings.referenceImage]);
 
   useEffect(() => {
     const opacity = Math.max(0, Math.min(1, Number(sceneSettings.gridOpacity ?? 0.2)));
     gridHelpersRef.current.forEach((grid) => {
+      grid.visible = sceneSettings.showGrid ?? true;
       const material = grid.material;
       if (Array.isArray(material)) {
         material.forEach((m) => {
@@ -2332,7 +2346,22 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
         material.transparent = true;
       }
     });
-  }, [sceneSettings.gridOpacity]);
+  }, [sceneSettings.gridOpacity, sceneSettings.showGrid]);
+
+  
+  useEffect(() => {
+    sceneObjectMeshesRef.current.forEach((mesh) => {
+      mesh.visible = sceneSettings.showObjects ?? true;
+    });
+  }, [sceneSettings.showObjects, sceneObjects]);
+
+  useEffect(() => {
+    particleSystemsRef.current.forEach((system) => {
+      system.particles.forEach(p => {
+        if (p.mesh) p.mesh.visible = sceneSettings.showParticles ?? true;
+      });
+    });
+  }, [sceneSettings.showParticles]);
 
   // Handle view mode changes
   useEffect(() => {
@@ -3377,27 +3406,75 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
 
   useImperativeHandle(ref, () => ({
     getParticleTextureBlob: async () => {
-        // Generate a generic particle sprite data url
+        const particleType = sceneSettings.particleType ?? 'dots';
+        const glowEnabled = sceneSettings.glowEnabled ?? false;
+        
         return new Promise<Blob | null>((resolve) => {
+            const textureType = particleType === 'dots' && !glowEnabled ? 'circles' : particleType;
             const size = 64;
             const canvas = document.createElement('canvas');
             canvas.width = size;
             canvas.height = size;
             const ctx = canvas.getContext('2d');
             if (!ctx) return resolve(null);
-            
+
             ctx.clearRect(0, 0, size, size);
             const center = size / 2;
             const radius = size * 0.4;
-            
-            const gradient = ctx.createRadialGradient(center, center, 0, center, center, radius * 1.2);
-            gradient.addColorStop(0, 'rgba(255,255,255,1)');
-            gradient.addColorStop(0.25, 'rgba(255,255,255,0.95)');
-            gradient.addColorStop(0.6, 'rgba(255,255,255,0.5)');
-            gradient.addColorStop(1, 'rgba(255,255,255,0)');
-            ctx.fillStyle = gradient;
-            ctx.fillRect(0, 0, size, size);
-            
+
+            const makeGlowGradient = () => {
+              const gradient = ctx.createRadialGradient(center, center, 0, center, center, radius * 1.15);
+              gradient.addColorStop(0, 'rgba(255,255,255,1)');
+              gradient.addColorStop(0.45, 'rgba(255,255,255,0.85)');
+              gradient.addColorStop(1, 'rgba(255,255,255,0)');
+              return gradient;
+            };
+
+            if (textureType === 'stars') {
+              const starRadiusOuter = radius;
+              const starRadiusInner = radius * 0.45;
+              ctx.beginPath();
+              for (let i = 0; i < 10; i++) {
+                const angle = (Math.PI / 5) * i - Math.PI / 2;
+                const r = i % 2 === 0 ? starRadiusOuter : starRadiusInner;
+                const x = center + Math.cos(angle) * r;
+                const y = center + Math.sin(angle) * r;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+              }
+              ctx.closePath();
+              ctx.fillStyle = glowEnabled ? makeGlowGradient() : 'rgba(255,255,255,1)';
+              ctx.fill();
+            } else if (textureType === 'sprites') {
+              const gradient = ctx.createRadialGradient(center, center, 0, center, center, radius * 1.2);
+              gradient.addColorStop(0, 'rgba(255,255,255,1)');
+              gradient.addColorStop(0.25, 'rgba(255,255,255,0.95)');
+              gradient.addColorStop(0.6, 'rgba(255,255,255,0.5)');
+              gradient.addColorStop(1, 'rgba(255,255,255,0)');
+              ctx.fillStyle = gradient;
+              ctx.fillRect(0, 0, size, size);
+            } else if (textureType === 'glow-circles') {
+              ctx.beginPath();
+              ctx.arc(center, center, radius, 0, Math.PI * 2);
+              ctx.closePath();
+              ctx.fillStyle = makeGlowGradient();
+              ctx.fill();
+            } else {
+              if (glowEnabled) {
+                ctx.beginPath();
+                ctx.arc(center, center, radius, 0, Math.PI * 2);
+                ctx.closePath();
+                ctx.fillStyle = makeGlowGradient();
+                ctx.fill();
+              } else {
+                ctx.beginPath();
+                ctx.arc(center, center, radius * 0.5, 0, Math.PI * 2);
+                ctx.closePath();
+                ctx.fillStyle = 'rgba(255,255,255,1)';
+                ctx.fill();
+              }
+            }
+
             canvas.toBlob((blob) => {
                 resolve(blob);
             }, 'image/png');
@@ -3452,42 +3529,82 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
         const boneAnim = { translate: [] as any[], scale: [] as any[] };
         const slotAnim = { rgba: [] as any[] };
 
-        // For determining gaps where particle is dead/reborn
-        let lastFrame = -2;
+        // Chunk history into contiguous life segments
+          const lifespans = [];
+          let currentLifespan = [];
+          let lastFrame = -2;
 
-        for (const { frame, state } of history) {
-          const time = frame / 24;
-          
-          if (frame > lastFrame + 1 && lastFrame !== -2) {
-             // It was dead, zero out old and new frame
-             slotAnim.rgba.push({ time: (lastFrame + 1) / 24, color: "ffffff00" });
-             slotAnim.rgba.push({ time: (frame - 0.01) / 24, color: "ffffff00" });
+          for (const item of history) {
+            if (item.frame > lastFrame + 1 && lastFrame !== -2) {
+              lifespans.push(currentLifespan);
+              currentLifespan = [];
+            }
+            currentLifespan.push(item);
+            lastFrame = item.frame;
+          }
+          if (currentLifespan.length > 0) lifespans.push(currentLifespan);
+
+          // Process each lifespan segment, downsampling to exactly 4 keys
+          for (let i = 0; i < lifespans.length; i++) {
+            const life = lifespans[i];
+            if (life.length === 0) continue;
+            
+            // Rebirth gap invisible frame
+            if (i > 0 || life[0].frame > 0) {
+              slotAnim.rgba.push({ time: (life[0].frame - 1) / 24, color: 'ffffff00' });
+            }
+
+            // Exactly 4 keys distributed evenly
+            const maxKeys = 4;
+            const bakedKeys = [];
+            if (life.length <= maxKeys) {
+                bakedKeys.push(...life);
+            } else {
+                for (let j = 0; j < maxKeys; j++) {
+                    const idx = Math.floor(j * (life.length - 1) / (maxKeys - 1));
+                    bakedKeys.push(life[idx]);
+                }
+            }
+
+            for (let k = 0; k < bakedKeys.length; k++) {
+              const { frame, state } = bakedKeys[k];
+              const time = frame / 24;
+              
+              const alphaFade = Math.max(0, Math.min(1, 1 - (state.age / state.lifetime)));
+              const baseAlpha = Math.max(0, Math.min(1, state.opacity));
+              const finalAlpha = Math.floor(alphaFade * baseAlpha * 255).toString(16).padStart(2, '0');
+              
+              const isLastKey = k === bakedKeys.length - 1;
+              let translateCurve = !isLastKey ? { curve: [0.333, 0, 0.667, 1] as any } : {};
+let scaleCurve = !isLastKey ? { curve: [0.333, 0, 0.667, 1] as any } : {};
+let rgbaCurve = !isLastKey ? { curve: [0.333, 0, 0.667, 1] as any } : {};
+
+              slotAnim.rgba.push({ time, color: `ffffff${finalAlpha}`, ...rgbaCurve });
+
+              boneAnim.translate.push({
+                 time,
+                 x: state.position.x * 10,
+                 y: state.position.y * 10,
+                 ...translateCurve
+              });
+
+              const sizeScale = Math.max(0.05, state.size * 4) / 64;
+              boneAnim.scale.push({
+                 time,
+                 x: sizeScale,
+                 y: sizeScale,
+                 ...scaleCurve
+              });
+
+              
+            }
+
+            // Death invisible frame
+            const deathFrame = life[life.length - 1].frame;
+            slotAnim.rgba.push({ time: (deathFrame + 1) / 24, color: 'ffffff00' });
           }
 
-          // Use age/lifetime to fade out gracefully
-          const alphaFade = Math.max(0, Math.min(1, 1 - (state.age / state.lifetime)));
-          const baseAlpha = Math.max(0, Math.min(1, state.opacity));
-          const finalAlpha = Math.floor(alphaFade * baseAlpha * 255).toString(16).padStart(2, '0');
-          
-          slotAnim.rgba.push({ time, color: `ffffff${finalAlpha}` });
-
-          boneAnim.translate.push({
-             time,
-             // Map Three.js Y-up coordinates to Spine coordinates, scaling by arbitrary factor or exact scene sizing
-             x: state.position.x * 10, y: state.position.y * 10
-          });
-          
-          const sizeScale = Math.max(0.05, state.size * 4) / 64; // arbitrary base size ratio
-          boneAnim.scale.push({
-             time,
-             x: sizeScale,
-             y: sizeScale
-          });
-
-          lastFrame = frame;
-        }
-
-        spineData.animations.animation.bones[boneName] = boneAnim;
+          spineData.animations.animation.bones[boneName] = boneAnim;
         spineData.animations.animation.slots[slotName] = slotAnim;
       });
 
@@ -3495,5 +3612,104 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
     }
   }));
 
-  return <div className="scene-canvas" ref={containerRef} tabIndex={0} />;
+  return (
+    <div style={{ position: 'relative', width: '100%', height: '100%', backgroundColor: sceneSettings.backgroundColor }}>
+      {sceneSettings.referenceImage && (
+        <img
+          src={sceneSettings.referenceImage}
+          alt="Reference Background"
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'contain',
+            opacity: sceneSettings.referenceOpacity ?? 0.5,
+            zIndex: 0,
+            pointerEvents: 'none'
+          }}
+        />
+      )}
+      <div className="scene-canvas" ref={containerRef} tabIndex={0} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 1, pointerEvents: 'auto' }} />
+      <div
+        className="viewport-shelf"
+        style={{
+          position: 'absolute',
+          bottom: '10px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 2,
+          display: 'flex',
+          gap: '15px',
+          background: 'rgba(30, 30, 30, 0.8)',
+          padding: '10px 15px',
+          borderRadius: '8px',
+          color: 'white',
+          alignItems: 'center',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          pointerEvents: 'auto'
+        }}
+      >
+        <label style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px' }}>
+          <input
+            type="checkbox"
+            checked={sceneSettings.showGrid ?? true}
+            onChange={(e) => onUpdateSceneSettings?.({ showGrid: e.target.checked })}
+          /> Grid
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px' }}>
+          <input
+            type="checkbox"
+            checked={sceneSettings.showObjects ?? true}
+            onChange={(e) => onUpdateSceneSettings?.({ showObjects: e.target.checked })}
+          /> Objects
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px' }}>
+          <input
+            type="checkbox"
+            checked={sceneSettings.showParticles ?? true}
+            onChange={(e) => onUpdateSceneSettings?.({ showParticles: e.target.checked })}
+          /> Particles
+        </label>
+
+        <div style={{ width: '1px', height: '20px', background: 'rgba(255,255,255,0.2)' }} />
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px', cursor: 'pointer' }}>
+          Ref Img:
+          <input
+            type="file"
+            accept="image/*"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) {
+                const reader = new FileReader();
+                reader.onload = (re) => onUpdateSceneSettings?.({ referenceImage: re.target?.result as string });
+                reader.readAsDataURL(file);
+              } else {
+                onUpdateSceneSettings?.({ referenceImage: null });
+              }
+            }}
+          />
+          <span style={{ background: '#444', padding: '2px 6px', borderRadius: '4px' }}>Browse</span>
+        </label>
+
+        {sceneSettings.referenceImage && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px' }}>
+            Opacity:
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value={sceneSettings.referenceOpacity ?? 0.5}
+              onChange={(e) => onUpdateSceneSettings?.({ referenceOpacity: parseFloat(e.target.value) })}
+              style={{ width: '60px' }}
+            />
+          </label>
+        )}
+      </div>
+    </div>
+  );
 });

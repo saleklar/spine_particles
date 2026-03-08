@@ -1,0 +1,37 @@
+<h2 class="h">Navigation</h2>
+<h2 id='IK-constraints'><a href='#IK-constraints'>IK constraints</a></h2>
+<h2 id='Transform-constraints'><a href='#Transform-constraints'>Transform constraints</a></h2>
+<h2 id='Path-constraints'><a href='#Path-constraints'>Path constraints</a></h2>
+<h2 id='Attachments'><a href='#Attachments'>Attachments</a></h2>
+ose from the start of the path to the end of each curve.</li> <li><b>vertexCount</b>: The number of path 
+<h2 id='Bone-timelines'><a href='#Bone-timelines'>Bone timelines</a></h2>
+or the keyframe. Assume 0 if omitted.</li> <li><b>curve:</b> The interpolation to use between this and th
+e next keyframe. If the attribute is omitted the curve is linear, if the value is the string "stepped" t
+he curve is stepped, otherwise the value is an array with 
+<h2 id='Slot-timelines'><a href='#Slot-timelines'>Slot timelines</a></h2>
+ two digit hex numbers in RGBA order.</li> <li><b>curve:</b> The interpolation to use between this and th
+e next keyframe. If the attribute is omitted the curve is linear, if the value is the string "stepped" t
+he curve is stepped, otherwise the value is <code>cx1</cod
+e> for a Bézier curve.<br>A Bézier curve has 4 elements which define the control points: <
+b>c2:</b> The <code>cy1</code> value for a Bézier curve. Assume 0 if omitted.</li> <li><b>c3:</b> The <co
+de>cx2</code> value for a Bézier curve. Assume 1 if omitted.</li> <li><b>c4:</b> The <co
+de>cy2</code> value for a Bézier curve. Assume 1 if omitted.</li> </ul><p></p> <p><b>two
+ two digit hex numbers in RGBA order.</li> <li><b>curve:</b> The interpolation to use between this and th
+e next keyframe. If the attribute is omitted the curve is linear, if the value is a string the curve is 
+erwise the value is <code>cx1</code> for a Bézier curve.<br>A Bézier curve has 4 elements which define th
+b>c2:</b> The <code>cy1</code> value for a Bézier curve.</li> <li><b>c3:</b> The <code>cx2</code> value f
+or a Bézier curve.</li> <li><b>c4:</b> The <code>cy2</code> value f
+or a Bézier curve.</li> </ul><p></p> <h2 id='IK-constraint-timeline
+<h2 id='Transform-constraint-timeline'><a href='#Transform-constraint-timeline'>Transform constraint timeline</a></h2>
+<h2 id='Path-constraint-timelines'><a href='#Path-constraint-timelines'>Path constraint timelines</a></h2>
+<h2 id='Deform-timeline'><a href='#Deform-timeline'>Deform timeline</a></h2>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<b class="s">"curve"</b>: [ <b class="n">0.25</b>, <b class="n">0</b>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<b class="s">"curve"</b>: [ <b class="n">0.25</b>, <b class="n">0</b>
+s, assume vertices after these are 0.</li> <li><b>curve:</b> The interpolation to use between this and th
+e next keyframe. If the attribute is omitted the curve is linear, if the value is the string "stepped" t
+he curve is stepped, otherwise the value is <code>cx1</cod
+e> for a Bézier curve.<br>A Bézier curve has 4 elements which define the control points: <
+b>c2:</b> The <code>cy1</code> value for a Bézier curve. Assume 0 if omitted.</li> <li><b>c3:</b> The <co
+de>cx2</code> value for a Bézier curve. Assume 1 if omitted.</li> <li><b>c4:</b> The <co
+de>cy2</code> value for a Bézier curve. Assume 1 if omitted.</li> </ul><p></p> <h2 id='E
+<h2 id='Draw-order-timeline'><a href='#Draw-order-timeline'>Draw order timeline</a></h2>

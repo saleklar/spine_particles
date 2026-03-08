@@ -110,6 +110,13 @@ export type AnimatorEffectsSettings = {
     glintVerticalBlur: number;
     glowBlur: number;
   };
+  colorCorrection: {
+    enabled: boolean;
+    brightness: number;
+    contrast: number;
+    saturation: number;
+    hue: number;
+  };
 };
 
 export type AnimatorObject = {

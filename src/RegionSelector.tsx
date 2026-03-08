@@ -389,7 +389,7 @@ export function RegionSelector({ onMapsGenerated, onClose }: RegionSelectorProps
     const heightMap = analyzer.generateHeightMap(regions, elevationSettings);
     
     // Generate normal map from height map
-    const normalMap = generateNormalMapFromHeight(heightMap, 3);
+    const normalMap = generateNormalMapFromHeight(heightMap, 10);
     
     // Convert to data URLs
     const heightDataUrl = imageDataToDataURL(heightMap);

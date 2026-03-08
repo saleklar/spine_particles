@@ -870,3 +870,14 @@ body {
   min-width: 20px;
   text-align: center;
 }
+
+.subpanel-content {
+  background: #242424;
+  border-left: 2px solid #5a5a5a;
+  padding: 0.2rem 0.4rem 0.5rem;
+  margin-top: -1px;
+  margin-bottom: 4px;
+  border-radius: 0 2px 2px 0;
+  display: flex;
+  flex-direction: column;
+}

@@ -168,6 +168,13 @@ const DEFAULT_EFFECTS: AnimatorEffectsSettings = {
     glintVerticalBlur: 1.0,
     glowBlur: 3.0,
   },
+  colorCorrection: {
+    enabled: false,
+    brightness: 1.0,
+    contrast: 1.0,
+    saturation: 1.0,
+    hue: 0.0,
+  },
 };
 
 const DEFAULT_PROJECT: AnimatorProject = {
@@ -251,11 +258,19 @@ const mergeProjectWithDefaults = (project: Partial<AnimatorProject> | null | und
         ...DEFAULT_EFFECTS.sparkles,
         ...(project.effects?.sparkles ?? {}),
       },
+      colorCorrection: {
+        ...DEFAULT_EFFECTS.colorCorrection,
+        ...(project.effects?.colorCorrection ?? {}),
+      },
     },
   };
 };
 
-export function Animator3D() {
+interface Animator3DProps {
+  onExportToParticleSystem?: (dataUrls: string[]) => void;
+}
+
+export function Animator3D({ onExportToParticleSystem }: Animator3DProps = {}) {
   const loadProjectFromStorage = (): AnimatorProject => {
     try {
       const saved = localStorage.getItem('bone_gyre_project');
@@ -285,7 +300,7 @@ export function Animator3D() {
   const [ridgeCount, setRidgeCount] = useState(100);
   const [ridgeDepth, setRidgeDepth] = useState(0.3);
   const [showCoinPresets, setShowCoinPresets] = useState(false);
-  const [exportFormat, setExportFormat] = useState<'individual' | 'zip'>('zip');
+  const [exportFormat, setExportFormat] = useState<'individual' | 'zip' | 'particle_system'>('zip');
   const [showRegionSelector, setShowRegionSelector] = useState(false);
   const [bevelEnabled, setBevelEnabled] = useState(true);
   const [bevelWidth, setBevelWidth] = useState(0.05);
@@ -668,7 +683,7 @@ export function Animator3D() {
       project.object.material.sideRidgeCount,
       project.object.material.sideRidgeDepth
     );
-    const sideNormal = generateNormalMapFromHeight(sideHeight, 3);
+    const sideNormal = generateNormalMapFromHeight(sideHeight, 10);
 
     setProject(prev => ({
       ...prev,
@@ -704,6 +719,17 @@ export function Animator3D() {
   const handleRenderComplete = async (frames: Blob[]) => {
     setIsRendering(false);
     
+    if (exportFormat === 'particle_system' && onExportToParticleSystem) {
+      // Convert blobs to base64 Data URLs so they can be sent into the particle system
+      const urls = await Promise.all(frames.map(blob => new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.readAsDataURL(blob);
+      })));
+      onExportToParticleSystem(urls);
+      return;
+    }
+
     if (exportFormat === 'zip') {
       // Create ZIP file
       const zip = new JSZip();
@@ -781,9 +807,9 @@ export function Animator3D() {
       heightData = applyBevelToHeightMap(heightData, bevelWidth);
     }
     
-    const normalData = generateNormalMapFromHeight(heightData, 3);
+    const normalData = generateNormalMapFromHeight(heightData, 10);
     const sideHeightData = generateCylinderBodyRidges(size, size, preset.ridgeCount, preset.ridgeDepth);
-    const sideNormalData = generateNormalMapFromHeight(sideHeightData, 3);
+    const sideNormalData = generateNormalMapFromHeight(sideHeightData, 10);
     
     const heightDataUrl = imageDataToDataURL(heightData);
     const normalDataUrl = imageDataToDataURL(normalData);
@@ -896,14 +922,14 @@ export function Animator3D() {
       heightData = applyBevelToHeightMap(heightData, bevelWidth);
     }
     
-    const normalData = generateNormalMapFromHeight(heightData, 3);
+    const normalData = generateNormalMapFromHeight(heightData, 10);
     
     const heightDataUrl = imageDataToDataURL(heightData);
     const normalDataUrl = imageDataToDataURL(normalData);
     const bumpDataUrl = heightDataUrl;
 
     const sideHeightData = generateCylinderBodyRidges(size, size, ridgeCount, ridgeDepth);
-    const sideNormalData = generateNormalMapFromHeight(sideHeightData, 3);
+    const sideNormalData = generateNormalMapFromHeight(sideHeightData, 10);
 
     setProject(prev => ({
       ...prev,
@@ -1445,7 +1471,7 @@ export function Animator3D() {
                   <input
                     type="range"
                     min="0"
-                    max="2"
+                    max="20"
                     step="0.01"
                     value={project.object.material.sideBumpScale}
                     onChange={(e) => setProject(prev => ({
@@ -1769,6 +1795,29 @@ export function Animator3D() {
                 }))}
                 style={{ width: '100%', marginBottom: '12px' }}
               />
+
+              {project.object.material.bumpMapDataUrl && (
+                <>
+                  <label style={{ display: 'block', marginBottom: '4px', fontSize: '12px' }}>
+                    Cap Bump Scale: {project.object.material.bumpScale?.toFixed(2) ?? '1.00'}
+                  </label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="20"
+                    step="0.01"
+                    value={project.object.material.bumpScale ?? 1}
+                    onChange={(e) => setProject(prev => ({
+                      ...prev,
+                      object: {
+                        ...prev.object,
+                        material: { ...prev.object.material, bumpScale: Number(e.target.value) }
+                      }
+                    }))}
+                    style={{ width: '100%', marginBottom: '12px' }}
+                  />
+                </>
+              )}
 
               <label style={{ display: 'block', marginBottom: '4px', fontSize: '12px' }}>Base Color</label>
               <input
@@ -2286,7 +2335,104 @@ export function Animator3D() {
                     sparkles: { ...prev.effects.sparkles, glowBlur: Number(e.target.value) },
                   },
                 }))}
+                style={{ width: '100%', marginBottom: '16px' }}
+              />
+              
+              <div style={{ paddingBottom: '8px', borderBottom: '1px solid #333', marginBottom: '12px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>
+                  <input
+                    type="checkbox"
+                    checked={project.effects.colorCorrection.enabled}
+                    onChange={(e) => setProject(prev => ({
+                      ...prev,
+                      effects: {
+                        ...prev.effects,
+                        colorCorrection: { ...prev.effects.colorCorrection, enabled: e.target.checked }
+                      }
+                    }))}
+                  />
+                  Color Correction
+                </label>
+              </div>
+
+              <label style={{ display: 'block', marginBottom: '4px', fontSize: '11px' }}>
+                Brightness: {project.effects.colorCorrection.brightness.toFixed(2)}
+              </label>
+              <input
+                type="range"
+                min="0"
+                max="3"
+                step="0.01"
+                value={project.effects.colorCorrection.brightness}
+                onChange={(e) => setProject(prev => ({
+                  ...prev,
+                  effects: {
+                    ...prev.effects,
+                    colorCorrection: { ...prev.effects.colorCorrection, brightness: Number(e.target.value) },
+                  },
+                }))}
+                style={{ width: '100%', marginBottom: '10px' }}
+                disabled={!project.effects.colorCorrection.enabled}
+              />
+
+              <label style={{ display: 'block', marginBottom: '4px', fontSize: '11px' }}>
+                Contrast: {project.effects.colorCorrection.contrast.toFixed(2)}
+              </label>
+              <input
+                type="range"
+                min="0"
+                max="3"
+                step="0.01"
+                value={project.effects.colorCorrection.contrast}
+                onChange={(e) => setProject(prev => ({
+                  ...prev,
+                  effects: {
+                    ...prev.effects,
+                    colorCorrection: { ...prev.effects.colorCorrection, contrast: Number(e.target.value) },
+                  },
+                }))}
+                style={{ width: '100%', marginBottom: '10px' }}
+                disabled={!project.effects.colorCorrection.enabled}
+              />
+
+              <label style={{ display: 'block', marginBottom: '4px', fontSize: '11px' }}>
+                Saturation: {project.effects.colorCorrection.saturation.toFixed(2)}
+              </label>
+              <input
+                type="range"
+                min="0"
+                max="3"
+                step="0.01"
+                value={project.effects.colorCorrection.saturation}
+                onChange={(e) => setProject(prev => ({
+                  ...prev,
+                  effects: {
+                    ...prev.effects,
+                    colorCorrection: { ...prev.effects.colorCorrection, saturation: Number(e.target.value) },
+                  },
+                }))}
+                style={{ width: '100%', marginBottom: '10px' }}
+                disabled={!project.effects.colorCorrection.enabled}
+              />
+
+              <label style={{ display: 'block', marginBottom: '4px', fontSize: '11px' }}>
+                Hue (Degrees): {project.effects.colorCorrection.hue.toFixed(0)}°
+              </label>
+              <input
+                type="range"
+                min="-180"
+                max="180"
+                step="1"
+                value={project.effects.colorCorrection.hue}
+                onChange={(e) => setProject(prev => ({
+                  ...prev,
+                  effects: {
+                    ...prev.effects,
+                    colorCorrection: { ...prev.effects.colorCorrection, hue: Number(e.target.value) },
+                  },
+                }))}
                 style={{ width: '100%', marginBottom: '8px' }}
+                disabled={!project.effects.colorCorrection.enabled}
               />
             </div>
           )}
@@ -2524,32 +2670,73 @@ export function Animator3D() {
                 Transparent Background
               </label>
 
-              <label style={{ display: 'block', marginBottom: '4px', fontSize: '12px' }}>Export As</label>
-              <select
-                value={exportFormat}
-                onChange={(e) => setExportFormat(e.target.value as 'individual' | 'zip')}
-                style={{ width: '100%', padding: '6px', marginBottom: '12px' }}
-              >
-                <option value="zip">ZIP Archive (Recommended)</option>
-                <option value="individual">Individual Files</option>
-              </select>
+              {onExportToParticleSystem && (
+                <button
+                  onClick={() => {
+                    setExportFormat('particle_system');
+                    setTimeout(handleRenderStart, 0);
+                  }}
+                  disabled={isRendering}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    marginTop: '10px',
+                    backgroundColor: isRendering ? '#555' : '#eeb868',
+                    color: '#1a1a1a',
+                    border: 'none',
+                    cursor: isRendering ? 'not-allowed' : 'pointer',
+                    fontSize: '14px',
+                    fontWeight: 'bold',
+                    borderRadius: '4px'
+                  }}
+                >
+                  {isRendering && exportFormat === 'particle_system' ? 'Rendering...' : 'Send Directly to Particle System'}
+                </button>
+              )}
+
+              <div style={{ marginTop: '15px', color: '#888', fontSize: '12px', textAlign: 'center', fontWeight: 'bold' }}>OR</div>
 
               <button
-                onClick={handleRenderStart}
+                onClick={() => {
+                  setExportFormat('zip');
+                  setTimeout(handleRenderStart, 0);
+                }}
                 disabled={isRendering}
                 style={{
                   width: '100%',
-                  padding: '12px',
-                  marginTop: '20px',
+                  padding: '10px',
+                  marginTop: '15px',
                   backgroundColor: isRendering ? '#555' : '#0066cc',
                   color: '#fff',
                   border: 'none',
                   cursor: isRendering ? 'not-allowed' : 'pointer',
                   fontSize: '14px',
                   fontWeight: 600,
+                  borderRadius: '4px'
                 }}
               >
-                {isRendering ? 'Rendering...' : 'Render Animation'}
+                {isRendering && exportFormat === 'zip' ? 'Rendering...' : 'Render to ZIP Archive'}
+              </button>
+
+              <button
+                onClick={() => {
+                  setExportFormat('individual');
+                  setTimeout(handleRenderStart, 0);
+                }}
+                disabled={isRendering}
+                style={{
+                  width: '100%',
+                  padding: '8px',
+                  marginTop: '10px',
+                  backgroundColor: isRendering ? '#333' : '#444',
+                  color: '#ccc',
+                  border: 'none',
+                  cursor: isRendering ? 'not-allowed' : 'pointer',
+                  fontSize: '12px',
+                  borderRadius: '4px'
+                }}
+              >
+                {isRendering && exportFormat === 'individual' ? 'Rendering...' : 'Download Individual Files'}
               </button>
 
               {isRendering && (

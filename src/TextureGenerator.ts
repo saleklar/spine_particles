@@ -187,7 +187,7 @@ export function generateCoinBevelPattern(
 
 export function generateNormalMapFromHeight(
   heightData: ImageData,
-  strength: number = 3
+  strength: number = 10
 ): ImageData {
   const width = heightData.width;
   const height = heightData.height;
