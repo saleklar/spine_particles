@@ -1,6 +1,6 @@
 // Types for 3D Asset Creator/Animator Module
 
-export type AnimatorGeometryType = 'cylinder' | 'sphere' | 'cube' | 'plane' | 'torus';
+export type AnimatorGeometryType = 'cylinder' | 'coin' | 'sphere' | 'cube' | 'plane' | 'torus';
 
 export type AnimatorLightSettings = {
   ambientColor: string;
@@ -130,6 +130,16 @@ export type AnimatorObject = {
     height?: number;
     radialSegments?: number;
     edgeBevel?: number; // 0-0.3, realtime scene bevel on cylinder edge
+
+    // Parametric Coin
+    coinFrameWidth?: number; // Rim width
+    coinFrameHeight?: number; // Rim extrusion amount
+    coinInnerShapePattern?: 'none' | 'star' | 'polygon' | 'circle';
+    coinInnerShapeSize?: number; // Percentage or absolute size of inner shape
+    coinInnerShapeDepth?: number; // Extrusion depth of inner shape
+    coinInnerShapePoints?: number; // e.g., 5 for star
+    coinInnerShapeRoundness?: number; // Corners beveling / fillet
+
     
     // Sphere
     radius?: number;

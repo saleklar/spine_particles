@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
+import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -905,6 +906,71 @@ export function Scene3DAnimator({
     };
 
     switch (objData.geometry) {
+case 'coin':
+  {
+    const radius = params.radiusTop ?? 50;
+    const fw = params.coinFrameWidth ?? 10;
+    const fh = params.coinFrameHeight ?? 20;
+    const size = params.coinInnerShapeSize ?? 20;
+    const depth = params.coinInnerShapeDepth ?? 10;
+    const pts = params.coinInnerShapePoints ?? 5;
+    const type = params.coinInnerShapePattern ?? 'star';
+    
+    const geometries = [];
+    const plateThickness = Math.max(1, depth * 0.5);
+    const plateGeo = new THREE.CylinderGeometry(radius - fw/2, radius - fw/2, plateThickness, 64);
+    plateGeo.rotateX(Math.PI / 2);
+    geometries.push(plateGeo);
+    
+    const rimShape = new THREE.Shape();
+    rimShape.absarc(0, 0, radius, 0, Math.PI * 2, false);
+    const rimHole = new THREE.Path();
+    rimHole.absarc(0, 0, radius - fw, 0, Math.PI * 2, true);
+    rimShape.holes.push(rimHole);
+    const rimExtrude = new THREE.ExtrudeGeometry(rimShape, {
+        depth: fh,
+        bevelEnabled: (params.edgeBevel ?? 0) > 0,
+        bevelThickness: params.edgeBevel ?? 1,
+        bevelSize: params.edgeBevel ?? 1,
+        bevelSegments: 2,
+        curveSegments: 64
+    });
+    rimExtrude.translate(0, 0, -fh/2);
+    geometries.push(rimExtrude);
+    
+    if (type !== 'none') {
+        const shape = new THREE.Shape();
+        if (type === 'circle') {
+            shape.absarc(0, 0, size, 0, Math.PI*2, false);
+        } else if (type === 'polygon') {
+            for(let i=0; i<pts; i++){
+                const a = (i/pts)*Math.PI*2 - Math.PI/2;
+                if(i===0) shape.moveTo(Math.cos(a)*size, Math.sin(a)*size);
+                else shape.lineTo(Math.cos(a)*size, Math.sin(a)*size);
+            }
+        } else if (type === 'star') {
+            for(let i=0; i<pts*2; i++){
+                const a = (i/(pts*2))*Math.PI*2 - Math.PI/2;
+                const r = i%2===0 ? size : size*0.4;
+                if(i===0) shape.moveTo(Math.cos(a)*r, Math.sin(a)*r);
+                else shape.lineTo(Math.cos(a)*r, Math.sin(a)*r);
+            }
+        }
+        const shapeGeo = new THREE.ExtrudeGeometry(shape, {
+            depth: depth,
+            bevelEnabled: (params.edgeBevel ?? 0) > 0,
+            bevelThickness: (params.edgeBevel ?? 1) * 0.5,
+            bevelSize: (params.edgeBevel ?? 1) * 0.5,
+            bevelSegments: 2
+        });
+        shapeGeo.translate(0, 0, -depth/2);
+        geometries.push(shapeGeo);
+    }
+    
+    geometry = BufferGeometryUtils.mergeGeometries(geometries, false);
+  }
+  break;
+
       case 'cylinder':
         {
           const radiusTop = params.radiusTop ?? 50;

@@ -1071,6 +1071,7 @@ export function Animator3D({ onExportToParticleSystem }: Animator3DProps = {}) {
                 style={{ width: '100%', padding: '6px', marginBottom: '12px' }}
               >
                 <option value="cylinder">Cylinder</option>
+                <option value="coin">Coin (Parametric)</option>
                 <option value="sphere">Sphere</option>
                 <option value="cube">Cube</option>
                 <option value="plane">Plane</option>

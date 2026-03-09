@@ -1,3 +1,4 @@
+process.env['ELECTRON_DISABLE_SECURITY_WARNINGS'] = 'true';
 const { app, BrowserWindow, dialog, ipcMain, shell, Menu } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs/promises');
@@ -95,6 +96,42 @@ function createWindow() {
 }
 
 app.on('ready', () => {
+  ipcMain.handle('save-spine-export', async (event, payload) => {
+    const { jsonString, assets, projectName } = payload;
+    
+    // Choose folder
+    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+      title: 'Select Export Directory',
+      properties: ['openDirectory', 'createDirectory']
+    });
+
+    if (canceled || filePaths.length === 0) return { success: false, error: 'Cancelled' };
+
+    const baseDir = filePaths[0];
+    const projectDir = path.join(baseDir, projectName || 'particle_export');
+
+    try {
+      await fs.mkdir(projectDir, { recursive: true });
+      const imagesDir = path.join(projectDir, 'images', 'particles', 'png');
+      await fs.mkdir(imagesDir, { recursive: true });
+
+      // Save JSON
+      await fs.writeFile(path.join(projectDir, 'particle_export_spine.json'), jsonString, 'utf8');
+
+      // Save assets
+      for (const asset of assets) {
+        // We receive asset.data as an ArrayBuffer from the renderer
+        const buffer = Buffer.from(asset.data);
+        await fs.writeFile(path.join(imagesDir, asset.name), buffer);
+      }
+
+      return { success: true, dir: projectDir };
+    } catch (err) {
+      console.error(err);
+      return { success: false, error: err.message };
+    }
+  });
+
   createWindow();
 });
 

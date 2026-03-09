@@ -202,12 +202,10 @@ body {
 }
 
 .file-panel {
-  width: 240px;
-  min-width: 240px;
-  max-width: 240px;
+  width: 280px;
+  min-width: 280px;
+  max-width: 280px;
   height: 100%;
-  min-height: 0;
-  background: #2f2f2f;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -314,6 +312,7 @@ body {
   text-align: left;
   cursor: pointer;
   font-size: 0.68rem;
+  flex-wrap: wrap; /* allow wrapping if it gets too tight */
 }
 
 .hierarchy-item:hover {
@@ -335,7 +334,7 @@ body {
 .hierarchy-item-name {
   color: #e3e9f5;
   font-weight: 600;
-  flex: 0 1 120px;
+  flex: 1 1 50px; /* modified to flex 1 instead of 0 1 120px */
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -445,6 +444,10 @@ body {
 .rename-icon-btn:hover {
   background: #2d3a49;
   border-color: #4d5f7a;
+}
+
+.rename-icon-btn.dimmed {
+  opacity: 0.3;
 }
 
 .hierarchy-empty {
@@ -880,4 +883,45 @@ body {
   border-radius: 0 2px 2px 0;
   display: flex;
   flex-direction: column;
+}
+
+
+.property-form label {
+  color: #4da6ff !important;
+}
+
+.panel label {
+  color: #4da6ff !important;
+}
+
+
+.property-form label {
+  color: #4da6ff !important;
+}
+
+.panel label {
+  color: #4da6ff !important;
+}
+
+
+.property-form label {
+  color: #4da6ff !important;
+}
+
+.panel label {
+  color: #4da6ff !important;
+}
+
+.panel h3,
+.right-panel h3,
+.left-panel h3 {
+  color: #4da6ff !important;
+}
+
+.property-form label {
+  color: #4da6ff !important;
+}
+
+.panel label {
+  color: #4da6ff !important;
 }

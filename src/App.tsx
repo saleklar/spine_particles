@@ -95,6 +95,7 @@ export type EmitterObject = SceneObject & {
     particleColorOverLife: boolean;
     particleColorOverLifeTarget: string;
     particleSizeOverLife: string;
+      particleSeed?: number;
     showPathCurves?: boolean;
     pathCurveKeyCount?: number;
   };
@@ -664,6 +665,7 @@ export function App() {
       particleColorOverLife: Boolean((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleColorOverLife ?? false),
       particleColorOverLifeTarget: String((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleColorOverLifeTarget ?? '#000000'),
       particleSizeOverLife: String((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleSizeOverLife ?? 'none'),
+        particleSeed: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleSeed ?? 0),
       showPathCurves: Boolean((selectedObject.properties as EmitterObject['properties'] | undefined)?.showPathCurves ?? false),
       pathCurveKeyCount: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.pathCurveKeyCount ?? 5),
     }
@@ -1006,6 +1008,7 @@ export function App() {
         particleColorOverLife: false,
         particleColorOverLifeTarget: '#000000',
         particleSizeOverLife: 'none',
+          particleSeed: Math.floor(Math.random() * 1000000),
         particleSpriteSequenceDataUrls: dataUrls,
         particleSpriteSequenceFirstName: 'Rendered Animation',
         particleSpriteSequenceFps: 24,
@@ -1056,6 +1059,7 @@ export function App() {
         particleColorOverLife: false,
         particleColorOverLifeTarget: '#000000',
         particleSizeOverLife: 'none',
+          particleSeed: Math.floor(Math.random() * 1000000),
         showPathCurves: false,
         pathCurveKeyCount: 5,
       };
@@ -1826,6 +1830,7 @@ export function App() {
             className="menu-button"
             onClick={() => setAppMode('3d-animator')}
             type="button"
+            style={{ backgroundColor: '#eeb868', color: '#1a1a1a', fontWeight: 'bold' }}
           >
             3D Asset Creator
           </button>
@@ -3631,7 +3636,20 @@ export function App() {
                           <option value="none">None</option>
                           <option value="shrink">Shrink</option>
                           <option value="grow">Grow</option>
-                        </select>
+                          </select>
+
+                          <label htmlFor="particle-seed">
+                            Random Seed: {selectedEmitterProperties.particleSeed ?? 0}
+                          </label>
+                          <input
+                            id="particle-seed"
+                            type="range"
+                            min="0"
+                            max="1000000"
+                            step="1"
+                            value={selectedEmitterProperties.particleSeed ?? 0}
+                            onChange={(event) => handleUpdateEmitterProperty('particleSeed', Number(event.target.value))}
+                          />
 
                         <hr className="form-divider" />
 

@@ -114,6 +114,33 @@
 			"type": "shell",
 			"command": "git add . ; git commit -m 'Backup' ; git push",
 			"isBackground": false
+		},
+		{
+			"label": "Create GitHub Repo",
+			"type": "shell",
+			"command": "gh repo create bone_gyre_2 --private --source=. --remote=origin --push",
+			"isBackground": false
+		},
+		{
+			"label": "git push",
+			"type": "shell",
+			"command": "git remote add origin https://github.com/saleklar/spine_particles.git ; git push -u origin master -f",
+			"isBackground": false
+		},
+		{
+			"label": "Check Types",
+			"type": "shell",
+			"command": "npx tsc --noEmit"
+		},
+		{
+			"label": "Check Types 2",
+			"type": "shell",
+			"command": "npx tsc --noEmit"
+		},
+		{
+			"label": "Run Dev",
+			"type": "shell",
+			"command": "powershell -ExecutionPolicy Bypass -File .\\run-dev.ps1"
 		}
 	]
 }
