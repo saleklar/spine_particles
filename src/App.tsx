@@ -208,26 +208,41 @@ export function App() {
       alert("No particle cache data available. Please play the animation to cache frames first.");
       return;
     }
-    
-    // Download JSON
-    const jsonString = JSON.stringify(spineData, null, 2);
-    const blob = new Blob([jsonString], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'particle_export_spine.json';
-    a.click();
-    URL.revokeObjectURL(url);
-    
-    // Download texture image
-    const imageBlob = await scene3DRef.current.getParticleTextureBlob();
-    if (imageBlob) {
-      const imgUrl = URL.createObjectURL(imageBlob);
-      const imgA = document.createElement('a');
-      imgA.href = imgUrl;
-      imgA.download = 'particle.png';
-      imgA.click();
-      URL.revokeObjectURL(imgUrl);
+
+    try {
+      const JSZip = (await import('jszip')).default;
+      const zip = new JSZip();
+
+      // Add JSON
+      const jsonString = JSON.stringify(spineData, null, 2);
+      zip.file('particle_export_spine.json', jsonString);
+
+      // Try getExportAssets first (handles sequences properly)
+      const assets = await scene3DRef.current.getExportAssets();
+      if (assets && assets.length > 0) {
+        for (const asset of assets) {
+          zip.file(asset.name, asset.blob);
+        }
+      } else {
+        // Fallback to getParticleTextureBlob for simple particle types like dots/stars
+        const imageBlob = await scene3DRef.current.getParticleTextureBlob();
+        if (imageBlob) {
+          zip.file('particle.png', imageBlob);
+        }
+      }
+
+      // Generate trigger download
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'spine_particles_export.zip';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Error creating zip export:", err);
+      // Fallback
+      alert("Error creating zip file. Check console.");
     }
   };
   const [sceneSize, setSceneSize] = useState<SceneSize>(DEFAULT_SCENE_SIZE);
