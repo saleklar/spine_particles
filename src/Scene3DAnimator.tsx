@@ -973,6 +973,19 @@ case 'coin':
     });
     geometry = BufferGeometryUtils.mergeGeometries(geometries, false);
     geometry.computeVertexNormals();
+
+    // Reconstruct UV mapping via Planar Projection so textures map correctly
+    const posAttribute = geometry.attributes.position;
+    const uvArray = new Float32Array(posAttribute.count * 2);
+    const r = radius > 0 ? radius : 50;
+    for (let i = 0; i < posAttribute.count; i++) {
+        const px = posAttribute.getX(i);
+        const py = posAttribute.getY(i);
+        // Map [-r, r] to [0, 1] on both axes
+        uvArray[i * 2] = (px / r) * 0.5 + 0.5;
+        uvArray[i * 2 + 1] = (py / r) * 0.5 + 0.5;
+    }
+    geometry.setAttribute('uv', new THREE.BufferAttribute(uvArray, 2));
   }
   break;
 
