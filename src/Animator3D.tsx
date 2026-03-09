@@ -267,10 +267,11 @@ const mergeProjectWithDefaults = (project: Partial<AnimatorProject> | null | und
 };
 
 interface Animator3DProps {
+  autoRenderOnChange?: boolean;
   onExportToParticleSystem?: (dataUrls: string[]) => void;
 }
 
-export function Animator3D({ onExportToParticleSystem }: Animator3DProps = {}) {
+export function Animator3D({ onExportToParticleSystem, autoRenderOnChange }: Animator3DProps = {}) {
   const loadProjectFromStorage = (): AnimatorProject => {
     try {
       const saved = localStorage.getItem('bone_gyre_project');

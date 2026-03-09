@@ -189,7 +189,7 @@ const interpolateSceneObject = (from: SceneObject, to: SceneObject, t: number): 
 };
 
 export function App() {
-  const [appMode, setAppMode] = useState<'particle-system' | '3d-animator'>('particle-system');
+  const [appMode, setAppMode] = useState<'particle-system' | '3d-animator' | 'split'>('particle-system');
   const [showScenePropertiesPanel, setShowScenePropertiesPanel] = useState(true);
   const [leftPanelTab, setLeftPanelTab] = useState<'scene' | 'hierarchy'>('hierarchy');
   const [renamingObjectId, setRenamingObjectId] = useState<string | null>(null);
