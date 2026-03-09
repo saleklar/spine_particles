@@ -33,9 +33,10 @@ function autoFitCylinderUVs(object: AnimatorObject): {
   sideUvScaleY: number;
 } {
   const geomParams = object.geometryParams;
+  const isCoin = object.geometry === 'coin';
   const radiusTop = geomParams.radiusTop || 50;
-  const radiusBottom = geomParams.radiusBottom || 50;
-  const height = geomParams.height || 100;
+  const radiusBottom = isCoin ? radiusTop : (geomParams.radiusBottom || 50);
+  const height = isCoin ? (geomParams.coinFrameHeight || 20) : (geomParams.height || 100);
 
   // For caps: always 1:1 (circular faces should fit in 0-1 range)
   const capUvScale = 1.0;
@@ -95,7 +96,7 @@ const DEFAULT_ANIMATOR_OBJECT: AnimatorObject = {
     metalness: 0.8,
     roughness: 0.2,
     reflectionIntensity: 1,
-    color: '#c0c0c0',
+    color: '#ffd700',
     emissive: '#000000',
     emissiveIntensity: 0,
   },
@@ -1477,6 +1478,29 @@ export function Animator3D({ onExportToParticleSystem, autoRenderOnChange, embed
               >
                 {project.object.material.normalMapName || 'Upload Normal Map'}
               </button>
+              {project.object.material.normalMapDataUrl && (
+                <button
+                  onClick={() => setProject(prev => ({
+                    ...prev,
+                    object: {
+                      ...prev.object,
+                      material: { ...prev.object.material, normalMapDataUrl: undefined, normalMapName: undefined }
+                    }
+                  }))}
+                  style={{ 
+                    width: '100%', 
+                    padding: '4px', 
+                    marginBottom: '12px',
+                    backgroundColor: '#500',
+                    color: '#fff',
+                    border: 'none',
+                    cursor: 'pointer',
+                    fontSize: '11px',
+                  }}
+                >
+                  Clear Normal Map
+                </button>
+              )}
 
               <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', marginTop: '12px' }}>Bump Map</label>
               <button
@@ -1493,8 +1517,31 @@ export function Animator3D({ onExportToParticleSystem, autoRenderOnChange, embed
               >
                 {project.object.material.bumpMapName || 'Upload Bump Map'}
               </button>
+              {project.object.material.bumpMapDataUrl && (
+                <button
+                  onClick={() => setProject(prev => ({
+                    ...prev,
+                    object: {
+                      ...prev.object,
+                      material: { ...prev.object.material, bumpMapDataUrl: undefined, bumpMapName: undefined }
+                    }
+                  }))}
+                  style={{ 
+                    width: '100%', 
+                    padding: '4px', 
+                    marginBottom: '12px',
+                    backgroundColor: '#500',
+                    color: '#fff',
+                    border: 'none',
+                    cursor: 'pointer',
+                    fontSize: '11px',
+                  }}
+                >
+                  Clear Bump Map
+                </button>
+              )}
 
-              {project.object.geometry === 'cylinder' && (
+              {(project.object.geometry === 'cylinder' || project.object.geometry === 'coin') && (
                 <div style={{ marginTop: '16px', padding: '12px', backgroundColor: '#252525', borderRadius: '4px' }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px', fontSize: '12px', fontWeight: 600 }}>
                     <input
@@ -1701,10 +1748,40 @@ export function Animator3D({ onExportToParticleSystem, autoRenderOnChange, embed
                       cursor: 'pointer',
                       fontSize: '11px',
                       fontWeight: 600,
+                      marginBottom: '8px',
                     }}
                   >
-                    Generate Side Ridges
+                    🛠️ Generate Side Ridges
                   </button>
+
+                  {(project.object.material.sideBumpMapDataUrl || project.object.material.sideNormalMapDataUrl) && (
+                    <button
+                      onClick={() => setProject(prev => ({
+                        ...prev,
+                        object: {
+                          ...prev.object,
+                          material: {
+                            ...prev.object.material,
+                            sideBumpMapDataUrl: undefined,
+                            sideBumpMapName: undefined,
+                            sideNormalMapDataUrl: undefined,
+                            sideNormalMapName: undefined,
+                          }
+                        }
+                      }))}
+                      style={{
+                        width: '100%',
+                        padding: '4px',
+                        backgroundColor: '#500',
+                        color: '#fff',
+                        border: 'none',
+                        cursor: 'pointer',
+                        fontSize: '11px',
+                      }}
+                    >
+                      Clear Side Maps
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -1713,7 +1790,7 @@ export function Animator3D({ onExportToParticleSystem, autoRenderOnChange, embed
                   UV Projection
                 </label>
 
-                {project.object.geometry === 'cylinder' && (
+                {(project.object.geometry === 'cylinder' || project.object.geometry === 'coin') && (
                   <button
                     onClick={handleApplyCoinSideFitPreset}
                     style={{

@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -516,11 +518,18 @@ export function Scene3DAnimator({
     
     if (renderSettings.shadows) {
       renderer.shadowMap.enabled = true;
-      renderer.shadowMap.type = THREE.PCFShadowMap;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap; // Softer, more realistic self-shadowing 
     }
     
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
+
+    // Set up Studio Environment for realistic metallic reflections
+    const pmremGenerator = new THREE.PMREMGenerator(renderer);
+    pmremGenerator.compileEquirectangularShader();
+    const envScene = new RoomEnvironment();
+    scene.environment = pmremGenerator.fromScene(envScene).texture;
+    envScene.dispose();
 
     // Grid helper
     const gridHelper = new THREE.GridHelper(400, 20, 0x444444, 0x222222);
@@ -839,6 +848,16 @@ export function Scene3DAnimator({
       if (lightData.castShadow) {
         light.shadow.mapSize.width = 2048;
         light.shadow.mapSize.height = 2048;
+        light.shadow.camera.near = 0.5;
+        light.shadow.camera.far = 1000;
+        // Expand frustum to cover big geometries (Coin max radius is ~100-200)
+        light.shadow.camera.left = -150;
+        light.shadow.camera.right = 150;
+        light.shadow.camera.top = 150;
+        light.shadow.camera.bottom = -150;
+        // Add a slight bias to prevent self-shadowing acne
+        light.shadow.bias = -0.0001;
+        light.shadow.normalBias = 0.05;
       }
       scene.add(light);
     });
@@ -852,6 +871,11 @@ export function Scene3DAnimator({
       );
       light.position.set(lightData.position.x, lightData.position.y, lightData.position.z);
       light.castShadow = lightData.castShadow;
+      if (lightData.castShadow) {
+        light.shadow.mapSize.width = 1024;
+        light.shadow.mapSize.height = 1024;
+        light.shadow.bias = -0.0005;
+      }
       scene.add(light);
     });
   };
@@ -930,14 +954,19 @@ case 'coin':
     const rimExtrude = new THREE.ExtrudeGeometry(rimShape, {
         depth: fh,
         bevelEnabled: (params.edgeBevel ?? 0) > 0,
-        bevelThickness: params.edgeBevel ?? 1,
-        bevelSize: params.edgeBevel ?? 1,
-        bevelSegments: 2,
+        bevelThickness: (params.edgeBevel ?? 0) * radius,
+        bevelSize: (params.edgeBevel ?? 0) * radius,
+        bevelSegments: 4,
         curveSegments: 64
     });
     rimExtrude.translate(0, 0, -fh/2);
-    geometries.push(rimExtrude.toNonIndexed());
-    
+    const rimGeo = rimExtrude.toNonIndexed();
+    rimGeo.groups.forEach(g => {
+        if (g.materialIndex === 0) g.materialIndex = 1;
+        else if (g.materialIndex === 1) g.materialIndex = 0;
+    });
+    geometries.push(rimGeo);
+
     if (type !== 'none') {
         const shape = new THREE.Shape();
         if (type === 'circle') {
@@ -959,33 +988,37 @@ case 'coin':
         const shapeGeo = new THREE.ExtrudeGeometry(shape, {
             depth: depth,
             bevelEnabled: (params.edgeBevel ?? 0) > 0,
-            bevelThickness: (params.edgeBevel ?? 1) * 0.5,
-            bevelSize: (params.edgeBevel ?? 1) * 0.5,
-            bevelSegments: 2
+            bevelThickness: (params.edgeBevel ?? 0) * size,
+            bevelSize: (params.edgeBevel ?? 0) * size,
+            bevelSegments: 4
         });
         shapeGeo.translate(0, 0, -depth/2);
-        geometries.push(shapeGeo.toNonIndexed());
+        const sGeo = shapeGeo.toNonIndexed();
+        sGeo.groups.forEach(g => {
+            if (g.materialIndex === 0) g.materialIndex = 1;
+            else if (g.materialIndex === 1) g.materialIndex = 0;
+        });
+        geometries.push(sGeo);
     }
-    
+
     geometries.forEach(g => {
         g.deleteAttribute('uv');
         g.deleteAttribute('normal');
     });
     geometry = BufferGeometryUtils.mergeGeometries(geometries, false);
-    geometry.computeVertexNormals();
+    
+    let offset = 0;
+    geometry.clearGroups();
+    geometries.forEach(g => {
+        if (g.groups) {
+            g.groups.forEach(group => {
+                geometry.addGroup(offset + group.start, group.count, group.materialIndex);
+            });
+        }
+        offset += g.attributes.position.count;
+    });
 
-    // Reconstruct UV mapping via Planar Projection so textures map correctly
-    const posAttribute = geometry.attributes.position;
-    const uvArray = new Float32Array(posAttribute.count * 2);
-    const r = radius > 0 ? radius : 50;
-    for (let i = 0; i < posAttribute.count; i++) {
-        const px = posAttribute.getX(i);
-        const py = posAttribute.getY(i);
-        // Map [-r, r] to [0, 1] on both axes
-        uvArray[i * 2] = (px / r) * 0.5 + 0.5;
-        uvArray[i * 2 + 1] = (py / r) * 0.5 + 0.5;
-    }
-    geometry.setAttribute('uv', new THREE.BufferAttribute(uvArray, 2));
+    geometry.computeVertexNormals();
   }
   break;
 
@@ -1014,11 +1047,23 @@ case 'coin':
         );
         break;
       case 'cube':
-        geometry = new THREE.BoxGeometry(
-          params.width ?? 100,
-          params.height ?? 100,
-          params.depth ?? 100
-        );
+        if ((params.edgeBevel ?? 0) > 0) {
+          const size = Math.max(params.width ?? 100, params.height ?? 100, params.depth ?? 100);
+          const radius = size * (params.edgeBevel ?? 0.05);
+          geometry = new RoundedBoxGeometry(
+            params.width ?? 100,
+            params.height ?? 100,
+            params.depth ?? 100,
+            10, // segments
+            radius
+          );
+        } else {
+          geometry = new THREE.BoxGeometry(
+            params.width ?? 100,
+            params.height ?? 100,
+            params.depth ?? 100
+          );
+        }
         break;
       case 'plane':
         geometry = new THREE.PlaneGeometry(
@@ -1039,12 +1084,15 @@ case 'coin':
     }
 
     // Create cap material (face/top/bottom)
-    const capMaterialOptions: THREE.MeshStandardMaterialParameters = {
+    const capMaterialOptions: THREE.MeshPhysicalMaterialParameters = {
       color: objData.material.color,
-      metalness: objData.material.metalness,
+      metalness: Math.max(0.001, objData.material.metalness),
       roughness: objData.material.roughness,
       emissive: objData.material.emissive,
       emissiveIntensity: objData.material.emissiveIntensity,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.1,
+      reflectivity: 1.0,
     };
 
     // Load textures if available
@@ -1105,12 +1153,15 @@ case 'coin':
 
     let mesh: THREE.Mesh;
     if (objData.geometry === 'cylinder' && objData.material.useSeparateSideMaterial) {
-      const sideMaterialOptions: THREE.MeshStandardMaterialParameters = {
+      const sideMaterialOptions: THREE.MeshPhysicalMaterialParameters = {
         color: objData.material.sideColor,
-        metalness: objData.material.metalness,
+        metalness: Math.max(0.001, objData.material.metalness),
         roughness: objData.material.roughness,
         emissive: objData.material.emissive,
         emissiveIntensity: objData.material.emissiveIntensity,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.1,
+        reflectivity: 1.0,
       };
 
       if (objData.material.sideNormalMapDataUrl) {
@@ -1127,11 +1178,11 @@ case 'coin':
         sideMaterialOptions.bumpScale = objData.material.sideBumpScale;
       }
 
-      const sideMaterial = new THREE.MeshStandardMaterial(sideMaterialOptions);
-      const capMaterial = new THREE.MeshStandardMaterial(capMaterialOptions);
+      const sideMaterial = new THREE.MeshPhysicalMaterial(sideMaterialOptions);
+      const capMaterial = new THREE.MeshPhysicalMaterial(capMaterialOptions);
       mesh = new THREE.Mesh(geometry, [sideMaterial, capMaterial, capMaterial]);
     } else {
-      const material = new THREE.MeshStandardMaterial(capMaterialOptions);
+      const material = new THREE.MeshPhysicalMaterial(capMaterialOptions);
       mesh = new THREE.Mesh(geometry, material);
     }
 
