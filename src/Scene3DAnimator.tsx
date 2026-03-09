@@ -6,6 +6,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { SSAOPass } from 'three/examples/jsm/postprocessing/SSAOPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { RGBShiftShader } from 'three/examples/jsm/shaders/RGBShiftShader.js';
 import { 
@@ -320,10 +321,11 @@ export function Scene3DAnimator({
       return;
     }
 
-    const { bloom, lens, sparkles } = effectsRef.current;
+    const { bloom, lens, sparkles, ambientOcclusion } = effectsRef.current;
     const useStarGlint = sparkles.shinyGlints;
     const useColorCorrection = effectsRef.current.colorCorrection?.enabled;
-    if (!bloom.enabled && !lens.enabled && !useStarGlint && !useColorCorrection) {
+    const useAO = ambientOcclusion?.enabled;
+    if (!bloom.enabled && !lens.enabled && !useStarGlint && !useColorCorrection && !useAO) {
       return;
     }
 
@@ -334,6 +336,15 @@ export function Scene3DAnimator({
     const composer = new EffectComposer(renderer);
     const renderPass = new RenderPass(scene, camera);
     composer.addPass(renderPass);
+
+    if (ambientOcclusion?.enabled) {
+      const size = renderer.getSize(new THREE.Vector2());
+      const ssaoPass = new SSAOPass(scene, camera, size.x, size.y);
+      ssaoPass.kernelRadius = ambientOcclusion.radius || 16;
+      ssaoPass.minDistance = 0.005;
+      ssaoPass.maxDistance = 0.1;
+      composer.addPass(ssaoPass);
+    }
 
     if (bloom.enabled) {
       const rendererSize = renderer.getSize(new THREE.Vector2());
@@ -971,18 +982,53 @@ case 'coin':
         const shape = new THREE.Shape();
         if (type === 'circle') {
             shape.absarc(0, 0, size, 0, Math.PI*2, false);
-        } else if (type === 'polygon') {
-            for(let i=0; i<pts; i++){
-                const a = (i/pts)*Math.PI*2 - Math.PI/2;
-                if(i===0) shape.moveTo(Math.cos(a)*size, Math.sin(a)*size);
-                else shape.lineTo(Math.cos(a)*size, Math.sin(a)*size);
+        } else if (type === 'polygon' || type === 'star') {
+            const points = [];
+            const ptsCount = type === 'polygon' ? pts : pts * 2;
+            for(let i=0; i<ptsCount; i++) {
+                const a = (i/ptsCount)*Math.PI*2 - Math.PI/2;
+                const r = (type === 'polygon' || i%2===0) ? size : size*0.4;
+                points.push({x: Math.cos(a)*r, y: Math.sin(a)*r});
             }
-        } else if (type === 'star') {
-            for(let i=0; i<pts*2; i++){
-                const a = (i/(pts*2))*Math.PI*2 - Math.PI/2;
-                const r = i%2===0 ? size : size*0.4;
-                if(i===0) shape.moveTo(Math.cos(a)*r, Math.sin(a)*r);
-                else shape.lineTo(Math.cos(a)*r, Math.sin(a)*r);
+            const roundness = params.coinInnerShapeRoundness ?? 0;
+            if (roundness <= 0.01) {
+                points.forEach((p, i) => {
+                    if (i === 0) shape.moveTo(p.x, p.y);
+                    else shape.lineTo(p.x, p.y);
+                });
+            } else {
+                let firstStartX = 0, firstStartY = 0;
+                for(let i=0; i<points.length; i++) {
+                    const prev = points[(i - 1 + points.length) % points.length];
+                    const curr = points[i];
+                    const next = points[(i + 1) % points.length];
+                    
+                    const dx1 = prev.x - curr.x;
+                    const dy1 = prev.y - curr.y;
+                    const len1 = Math.sqrt(dx1*dx1 + dy1*dy1);
+                    
+                    const dx2 = next.x - curr.x;
+                    const dy2 = next.y - curr.y;
+                    const len2 = Math.sqrt(dx2*dx2 + dy2*dy2);
+                    
+                    const d = Math.min(len1, len2) * 0.5 * roundness; // clamped roundness
+                    
+                    const startX = curr.x + (dx1 / len1) * d;
+                    const startY = curr.y + (dy1 / len1) * d;
+                    const endX = curr.x + (dx2 / len2) * d;
+                    const endY = curr.y + (dy2 / len2) * d;
+                    
+                    if (i === 0) {
+                        firstStartX = startX;
+                        firstStartY = startY;
+                        shape.moveTo(startX, startY);
+                        shape.quadraticCurveTo(curr.x, curr.y, endX, endY);
+                    } else {
+                        shape.lineTo(startX, startY);
+                        shape.quadraticCurveTo(curr.x, curr.y, endX, endY);
+                    }
+                }
+                shape.lineTo(firstStartX, firstStartY);
             }
         }
         const shapeGeo = new THREE.ExtrudeGeometry(shape, {

@@ -84,6 +84,11 @@ export type AnimatorRenderSettings = {
 };
 
 export type AnimatorEffectsSettings = {
+  ambientOcclusion?: {
+    enabled: boolean;
+    radius: number;
+    intensity: number;
+  };
   bloom: {
     enabled: boolean;
     intensity: number;

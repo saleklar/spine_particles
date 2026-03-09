@@ -19,6 +19,8 @@ type SceneSettings = {
   particlePreviewMode: 'real' | 'white-dots';
   particlePreviewSize: number;
   particleBudget: number;
+  particleSequenceBudget?: number;
+  particleSequenceBudgetLoop?: boolean;
   referenceImage?: string | null;
   referenceOpacity?: number;
   showGrid?: boolean;
@@ -72,6 +74,28 @@ export interface Scene3DRef {
   getParticleTextureBlob: () => Promise<Blob | null>;
   getExportAssets: () => Promise<Array<{ name: string, blob: Blob }>>;
 }
+
+
+const resampleSequence = (urls: string[], budget: number | undefined) => {
+  if (!budget || budget <= 0 || urls.length <= budget) return urls;
+  const step = urls.length / budget;
+  const resampled = [];
+  for(let i=0; i<budget; i++) {
+      resampled.push(urls[Math.floor(i * step)]);
+  }
+  return resampled;
+};
+
+const getResampledSequenceProps = (props: any, budget?: number, loop?: boolean) => {
+    let urls = Array.isArray(props?.particleSpriteSequenceDataUrls) ? props.particleSpriteSequenceDataUrls : [];
+    let fps = Number(props?.particleSpriteSequenceFps ?? 12);
+    const originalLength = urls.length;
+    const resampledUrls = resampleSequence(urls, budget);
+    if (!loop && originalLength > resampledUrls.length && resampledUrls.length > 0) {
+        fps = fps * (resampledUrls.length / originalLength);
+    }
+    return { urls: resampledUrls, fps };
+};
 
 export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneSettings, snapSettings, viewMode, onViewModeChange, sceneObjects, currentFrame, isPlaying, isCaching, physicsForces, selectedObjectId, selectedForceId, onObjectSelect, onForceSelect, onObjectTransform, onForceTransform, handleScale = 1.0, onCacheFrameCountChange, cacheResetToken = 0, onUpdateSceneSettings }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1531,12 +1555,9 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
           const emitterSpriteImageDataUrl = emitter && emitter.type === 'Emitter'
             ? String(emitterProps.particleSpriteImageDataUrl ?? '')
             : '';
-          const emitterSpriteSequenceDataUrls = emitter && emitter.type === 'Emitter' && Array.isArray(emitterProps.particleSpriteSequenceDataUrls)
-            ? (emitterProps.particleSpriteSequenceDataUrls as string[])
-            : [];
-          const emitterSpriteSequenceFps = emitter && emitter.type === 'Emitter'
-            ? Number(emitterProps.particleSpriteSequenceFps ?? 12)
-            : 12;
+          const seqProps = emitter && emitter.type === 'Emitter' ? getResampledSequenceProps(emitterProps, sceneSettingsRef.current.particleSequenceBudget, sceneSettingsRef.current.particleSequenceBudgetLoop) : { urls: [], fps: 12 };
+          const emitterSpriteSequenceDataUrls = seqProps.urls;
+          const emitterSpriteSequenceFps = seqProps.fps;
           const restoredSpeedMultiplier = 1 - emitterRotationSpeedVariation * 0.5 + Math.random() * emitterRotationSpeedVariation;
           const restoredSpriteTexture = (emitterParticleType === 'sprites' || emitterParticleType === '3d-model')
             ? resolveSpriteTexture(emitterSpriteImageDataUrl, emitterSpriteSequenceDataUrls, cached.age, emitterSpriteSequenceFps)
@@ -1810,10 +1831,9 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
                 const emitterRotationSpeed = Number(emitterProps.particleRotationSpeed ?? 0);
                 const emitterRotationSpeedVariation = Number(emitterProps.particleRotationSpeedVariation ?? 0);
                 const emitterSpriteImageDataUrl = String(emitterProps.particleSpriteImageDataUrl ?? '');
-                const emitterSpriteSequenceDataUrls = Array.isArray(emitterProps.particleSpriteSequenceDataUrls)
-                  ? (emitterProps.particleSpriteSequenceDataUrls as string[])
-                  : [];
-                const emitterSpriteSequenceFps = Number(emitterProps.particleSpriteSequenceFps ?? 12);
+                const seqProps = getResampledSequenceProps(emitterProps, sceneSettingsRef.current.particleSequenceBudget, sceneSettingsRef.current.particleSequenceBudgetLoop);
+                const emitterSpriteSequenceDataUrls = seqProps.urls;
+                const emitterSpriteSequenceFps = seqProps.fps;
                 const emitterColorVariation = emitterProps.particleColorVariation ?? 0;
                 const emitterSizeVariation = emitterProps.particleSizeVariation ?? 0;
                 
@@ -2118,9 +2138,8 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
                 const emitterRotationSpeed = Number(emitterProps.particleRotationSpeed ?? 0);
                 const emitterRotationSpeedVariation = Number(emitterProps.particleRotationSpeedVariation ?? 0);
                 const emitterSpriteImageDataUrl = String(emitterProps.particleSpriteImageDataUrl ?? '');
-                const emitterSpriteSequenceDataUrls = Array.isArray(emitterProps.particleSpriteSequenceDataUrls)
-                  ? (emitterProps.particleSpriteSequenceDataUrls as string[])
-                  : [];
+                const seqProps = getResampledSequenceProps(emitterProps, sceneSettingsRef.current.particleSequenceBudget, sceneSettingsRef.current.particleSequenceBudgetLoop);
+                const emitterSpriteSequenceDataUrls = seqProps.urls;
                 particle.baseColor = emitterColor;
                 particle.baseOpacity = emitterOpacity;
                 particle.particleType = emitterParticleType;
@@ -2147,7 +2166,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
                 const effectiveParticleType = getPreviewedParticleType(emitterParticleType);
                 const expectedSprite = effectiveParticleType === 'circles' || effectiveParticleType === 'glow-circles' || effectiveParticleType === 'sprites' || effectiveParticleType === '3d-model' || effectiveParticleType === 'stars';
                 const needsMeshSwap = expectedSprite !== (particle.mesh instanceof THREE.Sprite);
-                const currentEmitterFps = Number(emitterProps.particleSpriteSequenceFps ?? 12);
+                const currentEmitterFps = getResampledSequenceProps(emitterProps, sceneSettingsRef.current.particleSequenceBudget, sceneSettingsRef.current.particleSequenceBudgetLoop).fps;
                 if (needsMeshSwap) {
                   const existingMaterial = getParticleMaterial(particle.mesh);
                   const replacementSpriteTexture = (emitterParticleType === 'sprites' || emitterParticleType === '3d-model')
@@ -3550,7 +3569,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
             if (obj.type === 'Emitter') {
                 const props = obj.properties as any;
                 if (props?.particleSpriteSequenceDataUrls?.length > 0) {
-                    pUrls = props.particleSpriteSequenceDataUrls;
+                    pUrls = resampleSequence(props.particleSpriteSequenceDataUrls, sceneSettings.particleSequenceBudget);
                     hasCustomSequence = true;
                     break;
                 } else if (props?.particleSpriteImageDataUrl) {
@@ -3570,7 +3589,8 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
                 try {
                     const res = await fetch(pUrls[i]);
                     const blob = await (await fetch(pUrls[i])).blob();
-                    assets.push({ name: `particle${i}.png`, blob });
+                    const frameName = String(i).padStart(2, '0');
+                    assets.push({ name: `images/particles/png/particle_${frameName}.png`, blob });
                 } catch (e) {
                     console.error("Error fetching blob for sequence frame", i, e);
                 }
@@ -3582,7 +3602,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
             try {
                 const res = await fetch(singleUrl);
                 const blob = await res.blob();
-                assets.push({ name: 'particle.png', blob });
+                assets.push({ name: 'images/particles/png/particle.png', blob });
                 return assets;
             } catch(e) {
                 console.error("Error fetching single image blob", e);
@@ -3685,7 +3705,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
 
         return new Promise<Array<{name: string, blob: Blob}>>((resolve) => {
             canvas.toBlob((blob) => {
-                if (blob) assets.push({ name: 'particle.png', blob });
+                if (blob) assets.push({ name: 'images/particles/png/particle.png', blob });
                 resolve(assets);
             }, 'image/png');
         });
@@ -3705,7 +3725,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
         bones: [] as any[],
         slots: [] as any[],
         skins: [{ name: "default", attachments: {} }] as any[],
-        animations: { animation: { slots: {} as any, bones: {} as any } }
+        animations: { animation: { slots: {} as any, bones: {} as any, attachments: {"default": {}} as any } }
       };
 
       const frames = Array.from(particleFrameCacheRef.current.entries())
@@ -3731,11 +3751,12 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
       sceneObjectsRef.current.forEach(obj => {
           if (obj.type === 'Emitter') {
               const props = obj.properties as any;
-              const urls = props?.particleSpriteSequenceDataUrls || [];
+              const seqProps = getResampledSequenceProps(props, sceneSettings.particleSequenceBudget, sceneSettings.particleSequenceBudgetLoop);
+              const urls = seqProps.urls;
               if (urls.length > 0) {
-                  emitterSequences.set(obj.id, { 
-                      count: urls.length, 
-                      fps: props?.particleSpriteSequenceFps || 12 
+                  emitterSequences.set(obj.id, {
+                      count: urls.length,
+                      fps: seqProps.fps
                   });
               }
           }
@@ -3743,28 +3764,32 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
 
       trackData.forEach((history, trackId) => {
         const boneName = `track_${trackId}`;
-        const slotName = `track_${trackId}_slot`; // Renamed to avoid name collision inside attachments if needed? No, let's keep it slot_${trackId}
-        const realSlotName = `slot_${trackId}`;
+
+        const slotName = 'slot_' + trackId;
         
         spineData.bones.push({ name: boneName, parent: "root" });
-        spineData.slots.push({ name: realSlotName, bone: boneName, attachment: "particle" });
+        spineData.slots.push({ name: slotName, bone: boneName, attachment: "particle" });
 
         const firstState = history[0]?.state;
         const seqInfo = firstState ? emitterSequences.get(firstState.emitterId) : undefined;
 
         const skinAttachments = spineData.skins[0].attachments as any;
         if (seqInfo && seqInfo.count > 0) {
-            skinAttachments[realSlotName] = { 
-                "particle": { type: "region", name: "particle", width: 64, height: 64, sequence: { count: seqInfo.count, start: 0, digits: 0 } }
+            skinAttachments[slotName] = { 
+                "particle": { type: "region", name: "particles/png/particle", width: 64, height: 64, sequence: { count: seqInfo.count, start: 0, digits: 2 } }
             };
         } else {
-            skinAttachments[realSlotName] = { "particle": { type: "region", name: "particle", width: 64, height: 64 } };
+            skinAttachments[slotName] = { "particle": { type: "region", name: "particles/png/particle", width: 64, height: 64 } };
         }
-
         const boneAnim = { translate: [] as any[], scale: [] as any[] };
         const slotAnim: any = { rgba: [] as any[] };
+        let sequenceAnim: any = null;
         if (seqInfo && seqInfo.count > 0) {
-            slotAnim.sequence = [] as any[];
+            sequenceAnim = [] as any[];
+            if (!spineData.animations.animation.attachments["default"][slotName]) {
+                spineData.animations.animation.attachments["default"][slotName] = {};
+            }
+            spineData.animations.animation.attachments["default"][slotName]["particle"] = { sequence: sequenceAnim };
         }
 
         // Chunk history into contiguous life segments
@@ -3793,7 +3818,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
             }
             
             if (seqInfo && seqInfo.count > 0) {
-                slotAnim.sequence.push({
+                sequenceAnim!.push({
                    time: life[0].frame / 24,
                    mode: "loop",
                    index: 0,

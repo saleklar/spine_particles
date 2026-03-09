@@ -122,7 +122,7 @@ app.on('ready', () => {
       for (const asset of assets) {
         // We receive asset.data as an ArrayBuffer from the renderer
         const buffer = Buffer.from(asset.data);
-        await fs.writeFile(path.join(imagesDir, asset.name), buffer);
+        await fs.mkdir(path.dirname(path.join(projectDir, asset.name)), { recursive: true }); await fs.writeFile(path.join(projectDir, asset.name), buffer);
       }
 
       return { success: true, dir: projectDir };

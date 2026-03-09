@@ -143,6 +143,11 @@ const DEFAULT_RENDER_SETTINGS: AnimatorRenderSettings = {
 };
 
 const DEFAULT_EFFECTS: AnimatorEffectsSettings = {
+  ambientOcclusion: {
+    enabled: true,
+    radius: 16,
+    intensity: 1.0,
+  },
   bloom: {
     enabled: true,
     intensity: 0.8,
@@ -247,6 +252,10 @@ const mergeProjectWithDefaults = (project: Partial<AnimatorProject> | null | und
     effects: {
       ...DEFAULT_EFFECTS,
       ...(project.effects ?? {}),
+      ambientOcclusion: {
+        ...(DEFAULT_EFFECTS.ambientOcclusion || { enabled: true, radius: 16, intensity: 1.0 }),
+        ...(project.effects?.ambientOcclusion ?? {}),
+      },
       bloom: {
         ...DEFAULT_EFFECTS.bloom,
         ...(project.effects?.bloom ?? {}),
@@ -1258,6 +1267,20 @@ export function Animator3D({ onExportToParticleSystem, autoRenderOnChange, embed
                     style={{ width: '100%', padding: '6px', marginBottom: '8px' }}
                   />
                   <label style={{ display: 'block', marginBottom: '4px', fontSize: '12px' }}>
+                    Inner Shape Roundness: {((project.object.geometryParams.coinInnerShapeRoundness ?? 0) * 100).toFixed(0)}%
+                  </label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={project.object.geometryParams.coinInnerShapeRoundness ?? 0}
+                    onChange={(e) => setProject(prev => ({
+                      ...prev, object: { ...prev.object, geometryParams: { ...prev.object.geometryParams, coinInnerShapeRoundness: Number(e.target.value) } }
+                    }))}
+                    style={{ width: '100%', marginBottom: '10px' }}
+                  />
+                  <label style={{ display: 'block', marginBottom: '4px', fontSize: '12px' }}>
                     Scene Edge Bevel: {((project.object.geometryParams.edgeBevel ?? 0) * 100).toFixed(0)}%
                   </label>
                   <input
@@ -2161,6 +2184,61 @@ export function Animator3D({ onExportToParticleSystem, autoRenderOnChange, embed
 
           {activePanel === 'effects' && (
             <div>
+              <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: 600 }}>Ambient Occlusion</label>
+              <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px' }}>
+                <input
+                  type="checkbox"
+                  checked={project.effects.ambientOcclusion?.enabled ?? true}
+                  onChange={(e) => setProject(prev => ({
+                    ...prev,
+                    effects: {
+                      ...prev.effects,
+                      ambientOcclusion: { ...(prev.effects.ambientOcclusion || { radius: 16, intensity: 1.0 }), enabled: e.target.checked },
+                    },
+                  }))}
+                  style={{ marginRight: '8px' }}
+                />
+                Enable Ambient Occlusion
+              </label>
+
+              <label style={{ display: 'block', marginBottom: '4px', fontSize: '11px' }}>
+                Radius: {project.effects.ambientOcclusion?.radius?.toFixed(1) ?? '16.0'}
+              </label>
+              <input
+                type="range"
+                min="0"
+                max="32"
+                step="0.5"
+                value={project.effects.ambientOcclusion?.radius ?? 16}
+                onChange={(e) => setProject(prev => ({
+                  ...prev,
+                  effects: {
+                    ...prev.effects,
+                    ambientOcclusion: { ...(prev.effects.ambientOcclusion || { enabled: true, intensity: 1.0 }), radius: Number(e.target.value) },
+                  },
+                }))}
+                style={{ width: '100%', marginBottom: '10px' }}
+              />
+
+              <label style={{ display: 'block', marginBottom: '4px', fontSize: '11px' }}>
+                Intensity: {project.effects.ambientOcclusion?.intensity?.toFixed(2) ?? '1.00'}
+              </label>
+              <input
+                type="range"
+                min="0"
+                max="5"
+                step="0.1"
+                value={project.effects.ambientOcclusion?.intensity ?? 1.0}
+                onChange={(e) => setProject(prev => ({
+                  ...prev,
+                  effects: {
+                    ...prev.effects,
+                    ambientOcclusion: { ...(prev.effects.ambientOcclusion || { enabled: true, radius: 16 }), intensity: Number(e.target.value) },
+                  },
+                }))}
+                style={{ width: '100%', marginBottom: '16px' }}
+              />
+
               <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: 600 }}>Bloom / Glow</label>
               <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px' }}>
                 <input

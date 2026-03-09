@@ -15,6 +15,8 @@ type SceneSettings = {
   particlePreviewMode: 'real' | 'white-dots';
   particlePreviewSize: number;
   particleBudget: number;
+  particleSequenceBudget: number;
+  particleSequenceBudgetLoop: boolean;
 };
 
 export type SnapSettings = {
@@ -121,6 +123,8 @@ const DEFAULT_SCENE_SETTINGS: SceneSettings = {
   particlePreviewMode: 'real',
   particlePreviewSize: 1.2,
   particleBudget: 500,
+  particleSequenceBudget: 30,
+  particleSequenceBudgetLoop: true,
 };
 
 const DEFAULT_SNAP_SETTINGS: SnapSettings = {
@@ -210,25 +214,34 @@ export function App() {
     }
 
     try {
+      const jsonString = JSON.stringify(spineData, null, 2);
+
+      const assets = await scene3DRef.current.getExportAssets();
+      const exportAssets = [];
+      
       const JSZip = (await import('jszip')).default;
       const zip = new JSZip();
-
-      // Add JSON
-      const jsonString = JSON.stringify(spineData, null, 2);
       zip.file('particle_export_spine.json', jsonString);
 
-      // Try getExportAssets first (handles sequences properly)
-      const assets = await scene3DRef.current.getExportAssets();
       if (assets && assets.length > 0) {
         for (const asset of assets) {
           zip.file(asset.name, asset.blob);
+          exportAssets.push({ name: asset.name, data: await asset.blob.arrayBuffer() });
         }
       } else {
-        // Fallback to getParticleTextureBlob for simple particle types like dots/stars
-        const imageBlob = await scene3DRef.current.getParticleTextureBlob();
+        const imageBlob = await scene3DRef.current.getParticleTextureBlob();    
         if (imageBlob) {
-          zip.file('particle.png', imageBlob);
+          zip.file('images/particles/png/particle.png', imageBlob);
+          exportAssets.push({ name: 'images/particles/png/particle.png', data: await imageBlob.arrayBuffer() });
         }
+      }
+
+      if ((window as any).boneGyre2?.isElectron && (window as any).boneGyre2?.saveSpineExport) {
+        const res = await (window as any).boneGyre2.saveSpineExport({ jsonString, assets: exportAssets, projectName: 'particles' });
+        if (!res.success && res.error !== 'Cancelled') {
+           alert("Error saving: " + res.error);
+        }
+        return;
       }
 
       // Generate trigger download
@@ -2117,6 +2130,36 @@ export function App() {
           )}
         </div>
 
+        
+        <div className="menu-item">
+          <button
+            className="menu-button"
+            onClick={handleExportSpine}
+            style={{ 
+              backgroundColor: '#eeb868', 
+              color: '#1a1a1a', 
+              fontWeight: 'bold', 
+              whiteSpace: 'nowrap'
+            }}
+          >
+            Export Cached Animation
+          </button>
+        </div>
+        
+        <div className="menu-item">
+          <button
+            className="menu-button"
+            onClick={handleExportSpine}
+            style={{ 
+              backgroundColor: '#eeb868', 
+              color: '#1a1a1a', 
+              fontWeight: 'bold', 
+              whiteSpace: 'nowrap'
+            }}
+          >
+            Export Cached Animation
+          </button>
+        </div>
         <div className="snap-toolbar" title="Grid snapping options">
           <span className="snap-title">Snap</span>
           <label className="snap-axis snap-axis-x"><input type="checkbox" checked={snapSettings.snapX} onChange={(event) => setSnapSettings((prev) => ({ ...prev, snapX: event.target.checked }))} />X</label>
@@ -2314,6 +2357,34 @@ export function App() {
                     type="range"
                     value={sceneSettings.particleBudget}
                   />
+
+                  <label htmlFor="particle-sequence-budget" style={{ marginTop: '10px' }} title="Limits max number of frames for a particle sequence animation. It resamples the frames to loop within this budget.">
+                    Particle Sequence Budget (Max Frames): {sceneSettings.particleSequenceBudget}
+                  </label>
+                  <input
+                    id="particle-sequence-budget"
+                    max={120}
+                    min={1}
+                    onChange={(event) => setSceneSettings((prev) => ({
+                      ...prev,
+                      particleSequenceBudget: Number.parseInt(event.target.value, 10),
+                    }))}
+                    step={1}
+                    type="range"
+                    value={sceneSettings.particleSequenceBudget}
+                  />
+
+                  <label className="checkbox-label" style={{ marginTop: '10px' }} title="If checked, the animation loop speed is adjusted to fit within the frame budget. If unchecked, the original animation speed is kept, potentially cutting off the end.">
+                    <input
+                      type="checkbox"
+                      checked={sceneSettings.particleSequenceBudgetLoop ?? true}
+                      onChange={(e) => setSceneSettings((prev) => ({
+                        ...prev,
+                        particleSequenceBudgetLoop: e.target.checked
+                      }))}
+                    />
+                    Loop Animation to Fit Budget
+                  </label>
                 </div>
               )}
 
@@ -2587,6 +2658,7 @@ export function App() {
             handleScale={handleScale}
             onCacheFrameCountChange={setCachedFrameCount}
             cacheResetToken={cacheResetToken}
+            onUpdateSceneSettings={(updates) => setSceneSettings(prev => ({ ...prev, ...updates }))}
           />
         </main>
 
@@ -3657,13 +3729,7 @@ export function App() {
                           />
                           Show Particle Paths for Spine Export
                         </label>
-                        <button
-                            className="properties-panel-button"
-                            style={{ marginTop: '0.5rem', backgroundColor: '#eeb868', color: '#1a1a1a' }}
-                            onClick={handleExportSpine}
-                        >
-                            Export Cached Animation to Spine JSON
-                        </button>
+                        
                         {(selectedEmitterProperties.showPathCurves) && (
                           <>
                             <label htmlFor="path-curve-keys">
