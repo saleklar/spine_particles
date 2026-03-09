@@ -1,0 +1,2 @@
+const fs = require('fs'); let c = fs.readFileSync('src/Scene3D.tsx', 'utf8'); c = c.replace('            slotAnim.rgba.push({ time: (deathFrame + 1) / 24, color: \
+ffffff00\, curve: \stepped\ });', '            slotAnim.rgba.push({ time: (deathFrame + 1) / 24, color: \ffffff00\, curve: \stepped\ });\\n            slotAnim.attachment.push({ time: (deathFrame + 1) / 24, name: null });'); fs.writeFileSync('src/Scene3D.tsx', c); console.log('Replaced death frame');

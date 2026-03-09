@@ -267,12 +267,10 @@ const mergeProjectWithDefaults = (project: Partial<AnimatorProject> | null | und
 };
 
 interface Animator3DProps {
-  autoRenderOnChange?: boolean;
-  onExportToParticleSystem?: (dataUrls: string[], fps?: number) => void;
-  embeddedUI?: boolean;
+  onExportToParticleSystem?: (dataUrls: string[]) => void;
 }
 
-export function Animator3D({ onExportToParticleSystem, autoRenderOnChange, embeddedUI }: Animator3DProps = {}) {
+export function Animator3D({ onExportToParticleSystem }: Animator3DProps = {}) {
   const loadProjectFromStorage = (): AnimatorProject => {
     try {
       const saved = localStorage.getItem('bone_gyre_project');
@@ -302,13 +300,12 @@ export function Animator3D({ onExportToParticleSystem, autoRenderOnChange, embed
   const [ridgeCount, setRidgeCount] = useState(100);
   const [ridgeDepth, setRidgeDepth] = useState(0.3);
   const [showCoinPresets, setShowCoinPresets] = useState(false);
-  const [exportFormat, setExportFormat] = useState<'individual' | 'zip' | 'particle_system'>(autoRenderOnChange ? 'particle_system' : 'zip');
+  const [exportFormat, setExportFormat] = useState<'individual' | 'zip' | 'particle_system'>('zip');
   const [showRegionSelector, setShowRegionSelector] = useState(false);
   const [bevelEnabled, setBevelEnabled] = useState(true);
   const [bevelWidth, setBevelWidth] = useState(0.05);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const renderQueuedRef = useRef(false);
 
   // Save project to localStorage whenever it changes
   useEffect(() => {
@@ -318,21 +315,6 @@ export function Animator3D({ onExportToParticleSystem, autoRenderOnChange, embed
       console.error('Failed to save project to localStorage:', error);
     }
   }, [project]);
-
-  useEffect(() => {
-    if (autoRenderOnChange && onExportToParticleSystem) {
-      if (isRendering) {
-        renderQueuedRef.current = true;
-        return;
-      }
-      
-      const timer = setTimeout(() => {
-        handleRenderStart();
-      }, 500);
-      return () => clearTimeout(timer);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project, autoRenderOnChange]);
 
   const handleGeometryChange = (geometry: AnimatorGeometryType) => {
     let defaultParams = {};
@@ -744,12 +726,7 @@ export function Animator3D({ onExportToParticleSystem, autoRenderOnChange, embed
         reader.onloadend = () => resolve(reader.result as string);
         reader.readAsDataURL(blob);
       })));
-      onExportToParticleSystem(urls, project.animation?.fps || 30);
-      
-      if (renderQueuedRef.current) {
-        renderQueuedRef.current = false;
-        setTimeout(() => handleRenderStart(), 100);
-      }
+      onExportToParticleSystem(urls);
       return;
     }
 
@@ -1023,13 +1000,9 @@ export function Animator3D({ onExportToParticleSystem, autoRenderOnChange, embed
   };
 
   return (
-    <div style={embeddedUI ? { display: 'flex', flexDirection: 'column', width: '100%', backgroundColor: 'transparent', color: 'inherit' } : { display: 'flex', width: '100%', height: '100vh', backgroundColor: '#2a2a2a' }}>
+    <div style={{ display: 'flex', width: '100%', height: '100vh', backgroundColor: '#2a2a2a' }}>
       {/* Left Panel - Controls */}
-      <div style={embeddedUI ? {
-        width: '100%', 
-        display: 'flex',
-        flexDirection: 'column',
-      } : { 
+      <div style={{ 
         width: '320px', 
         backgroundColor: '#1e1e1e', 
         color: '#fff',
@@ -1037,11 +1010,9 @@ export function Animator3D({ onExportToParticleSystem, autoRenderOnChange, embed
         flexDirection: 'column',
         borderRight: '1px solid #333',
       }}>
-        {!embeddedUI && (
-          <div style={{ padding: '12px', borderBottom: '1px solid #333' }}>
-            <h2 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>3D Asset Creator</h2>
-          </div>
-        )}
+        <div style={{ padding: '12px', borderBottom: '1px solid #333' }}>
+          <h2 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>3D Asset Creator</h2>
+        </div>
 
         {/* Panel Tabs */}
         <div style={{ display: 'flex', borderBottom: '1px solid #333' }}>
@@ -1100,7 +1071,6 @@ export function Animator3D({ onExportToParticleSystem, autoRenderOnChange, embed
                 style={{ width: '100%', padding: '6px', marginBottom: '12px' }}
               >
                 <option value="cylinder">Cylinder</option>
-                <option value="coin">Coin (Parametric)</option>
                 <option value="sphere">Sphere</option>
                 <option value="cube">Cube</option>
                 <option value="plane">Plane</option>
@@ -2796,15 +2766,7 @@ export function Animator3D({ onExportToParticleSystem, autoRenderOnChange, embed
       </div>
 
       {/* Right Panel - 3D View */}
-      <div style={embeddedUI ? {
-        position: 'absolute',
-        top: -9999,
-        left: -9999,
-        width: 800,
-        height: 600,
-        opacity: 0,
-        pointerEvents: 'none',
-      } : { flex: 1, position: 'relative', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column' }}>
         {/* Top bar with snapshot button */}
         <div style={{
           padding: '8px 12px',

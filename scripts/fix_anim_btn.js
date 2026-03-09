@@ -1,0 +1,1 @@
+const fs = require('fs'); let c = fs.readFileSync('src/Animator3D.tsx', 'utf8'); c = c.replace(/<button\\s+onClick=\\{onExportToParticleSystem\\}[\\s\\S]*?<\\/button>/, ''); fs.writeFileSync('src/Animator3D.tsx', c); console.log('Removed export button from old location');

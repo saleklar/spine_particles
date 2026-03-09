@@ -1,0 +1,1 @@
+const fs = require('fs'); let c = fs.readFileSync('src/Scene3D.tsx', 'utf8'); c = c.replace(/const slotAnim: any = \\{ rgba: \\[\\] as any\\[\\] \\};/, 'const slotAnim: any = { rgba: [] as any[], attachment: [] as any[] };\\n        const attachSequence: any[] = [];'); fs.writeFileSync('src/Scene3D.tsx', c); console.log('Replaced slotAnim');

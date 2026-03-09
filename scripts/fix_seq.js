@@ -1,0 +1,1 @@
+const fs = require('fs'); let c = fs.readFileSync('src/Scene3D.tsx', 'utf8'); c = c.replace(/if \\(seqInfo && seqInfo\\.count > 0\\) \\{\\s*slotAnim\\.sequence = \\[\\] as any\\[\\];\\s*\\}/g, ''); fs.writeFileSync('src/Scene3D.tsx', c); console.log('Fixed A');

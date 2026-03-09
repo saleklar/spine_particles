@@ -1,0 +1,1 @@
+const fs = require('fs'); let txt = fs.readFileSync('src/Animator3D.tsx', 'utf8'); txt = txt.replace(/style={{ width: '100%', marginBottom: '10px' }}/g, 'style={{ width: \\'100%\\', marginBottom: \\'10px\\', position: \\'relative\\', zIndex: 110, pointerEvents: \\'auto\\' }}'); fs.writeFileSync('src/Animator3D.tsx', txt);

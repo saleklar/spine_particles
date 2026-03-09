@@ -65,7 +65,7 @@ type CachedParticleState = {
   size: number;
 };
 
-type ParticleVisualType = 'dots' | 'stars' | 'circles' | 'glow-circles' | 'sprites';
+type ParticleVisualType = 'dots' | 'stars' | 'circles' | 'glow-circles' | 'sprites' | '3d-model';
 
 export interface Scene3DRef {
   exportSpineData: () => any;
@@ -1273,7 +1273,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
           ctx.restore();
           
           ctx.restore();
-        } else if (textureType === 'sprites') {
+        } else if ((textureType === 'sprites' || textureType === '3d-model')) {
           const gradient = ctx.createRadialGradient(center, center, 0, center, center, radius * 1.2);
           gradient.addColorStop(0, 'rgba(255,255,255,1)');
           gradient.addColorStop(0.25, 'rgba(255,255,255,0.95)');
@@ -1410,13 +1410,13 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
         spriteTexture?: THREE.Texture
       ) => {
         const resolvedParticleType = (particleType ?? 'dots') as ParticleVisualType;
-        const shouldUseSprite = resolvedParticleType === 'circles' || resolvedParticleType === 'glow-circles' || resolvedParticleType === 'sprites' || resolvedParticleType === 'stars';
+        const shouldUseSprite = resolvedParticleType === 'circles' || resolvedParticleType === 'glow-circles' || resolvedParticleType === 'sprites' || resolvedParticleType === '3d-model' || resolvedParticleType === 'stars';
         const texture = getParticleTexture(resolvedParticleType, customGlow);
 
         if (shouldUseSprite) {
           const spriteMaterial = new THREE.SpriteMaterial({
             color: new THREE.Color(color),
-            map: resolvedParticleType === 'sprites' && spriteTexture ? spriteTexture : texture,
+            map: (resolvedParticleType === 'sprites' || resolvedParticleType === '3d-model') && spriteTexture ? spriteTexture : texture,
             transparent: true,
             opacity,
             depthWrite: !customGlow,
@@ -1538,7 +1538,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
             ? Number(emitterProps.particleSpriteSequenceFps ?? 12)
             : 12;
           const restoredSpeedMultiplier = 1 - emitterRotationSpeedVariation * 0.5 + Math.random() * emitterRotationSpeedVariation;
-          const restoredSpriteTexture = emitterParticleType === 'sprites'
+          const restoredSpriteTexture = (emitterParticleType === 'sprites' || emitterParticleType === '3d-model')
             ? resolveSpriteTexture(emitterSpriteImageDataUrl, emitterSpriteSequenceDataUrls, cached.age, emitterSpriteSequenceFps)
             : undefined;
           const previewedType = getPreviewedParticleType(emitterParticleType);
@@ -1554,7 +1554,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
             previewedType,
             previewedGlow,
             cached.rotation,
-            previewedType === 'sprites' ? restoredSpriteTexture : undefined
+            (previewedType === 'sprites' || previewedType === '3d-model') ? restoredSpriteTexture : undefined
           );
 
           scene.add(particleMesh);
@@ -1833,7 +1833,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
                 const particleRotation = emitterRotation + particleRotationOffset;
                 const particleRotationSpeedMultiplier = 1 - emitterRotationSpeedVariation * 0.5 + Math.random() * emitterRotationSpeedVariation;
                 const particleRotationSpeed = emitterRotationSpeed * particleRotationSpeedMultiplier;
-                const spawnSpriteTexture = emitterParticleType === 'sprites'
+                const spawnSpriteTexture = (emitterParticleType === 'sprites' || emitterParticleType === '3d-model')
                   ? resolveSpriteTexture(emitterSpriteImageDataUrl, emitterSpriteSequenceDataUrls, 0, emitterSpriteSequenceFps)
                   : undefined;
                 const previewedType = getPreviewedParticleType(emitterParticleType);
@@ -1849,7 +1849,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
                   previewedType,
                   previewedGlow,
                   particleRotation,
-                  previewedType === 'sprites' ? spawnSpriteTexture : undefined
+                  (previewedType === 'sprites' || previewedType === '3d-model') ? spawnSpriteTexture : undefined
                 );
                 
                 const emitterSpeed = emitterProps.particleSpeed ?? 50;
@@ -2145,12 +2145,12 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
                 particle.rotationSpeed = emitterRotationSpeed * (particle.rotationSpeedMultiplier ?? 1);
 
                 const effectiveParticleType = getPreviewedParticleType(emitterParticleType);
-                const expectedSprite = effectiveParticleType === 'circles' || effectiveParticleType === 'glow-circles' || effectiveParticleType === 'sprites' || effectiveParticleType === 'stars';
+                const expectedSprite = effectiveParticleType === 'circles' || effectiveParticleType === 'glow-circles' || effectiveParticleType === 'sprites' || effectiveParticleType === '3d-model' || effectiveParticleType === 'stars';
                 const needsMeshSwap = expectedSprite !== (particle.mesh instanceof THREE.Sprite);
                 const currentEmitterFps = Number(emitterProps.particleSpriteSequenceFps ?? 12);
                 if (needsMeshSwap) {
                   const existingMaterial = getParticleMaterial(particle.mesh);
-                  const replacementSpriteTexture = emitterParticleType === 'sprites'
+                  const replacementSpriteTexture = (emitterParticleType === 'sprites' || emitterParticleType === '3d-model')
                     ? resolveSpriteTexture(
                       particle.spriteImageDataUrl ?? '',
                       particle.spriteSequenceDataUrls ?? [],
@@ -2166,7 +2166,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
                     effectiveParticleType,
                     getPreviewedGlow(emitterGlow),
                     particle.rotation ?? getParticleRotation(particle.mesh),
-                    effectiveParticleType === 'sprites' ? replacementSpriteTexture : undefined
+                    (effectiveParticleType === 'sprites' || effectiveParticleType === '3d-model') ? replacementSpriteTexture : undefined
                   );
                   scene.remove(particle.mesh);
                   scene.add(replacementMesh);
@@ -2192,7 +2192,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
                   material.opacity = particle.baseOpacity ?? 0.8;
                 }
 
-                if (effectiveParticleType === 'sprites') {
+                if ((effectiveParticleType === 'sprites' || effectiveParticleType === '3d-model')) {
                   const spriteTexture = resolveSpriteTexture(
                     particle.spriteImageDataUrl ?? '',
                     particle.spriteSequenceDataUrls ?? [],
@@ -3502,7 +3502,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
               ctx.restore();
               
               ctx.restore();
-            } else if (textureType === 'sprites') {
+            } else if ((textureType === 'sprites' || textureType === '3d-model')) {
               const gradient = ctx.createRadialGradient(center, center, 0, center, center, radius * 1.2);
               gradient.addColorStop(0, 'rgba(255,255,255,1)');
               gradient.addColorStop(0.25, 'rgba(255,255,255,0.95)');
@@ -3653,7 +3653,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
             ctx.restore();
             
             ctx.restore();
-        } else if (textureType === 'sprites') {
+        } else if ((textureType === 'sprites' || textureType === '3d-model')) {
             const gradient = ctx.createRadialGradient(center, center, 0, center, center, radius * 1.2);
             gradient.addColorStop(0, 'rgba(255,255,255,1)');
             gradient.addColorStop(0.25, 'rgba(255,255,255,0.95)');

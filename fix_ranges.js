@@ -1,0 +1,1 @@
+const fs = require('fs'); let txt = fs.readFileSync('src/Animator3D.tsx', 'utf8'); txt = txt.replace(/, position: 'relative', zIndex: 110, pointerEvents: 'auto' \}\}/g, ' }}'); fs.writeFileSync('src/Animator3D.tsx', txt);

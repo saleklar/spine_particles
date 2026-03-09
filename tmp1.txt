@@ -76,7 +76,7 @@ export type EmitterObject = SceneObject & {
     particleColor: string;
     particleSize: number;
     particleOpacity: number;
-    particleType: 'dots' | 'stars' | 'circles' | 'glow-circles' | 'sprites' | '3d-model';
+    particleType: 'dots' | 'stars' | 'circles' | 'glow-circles' | 'sprites';
     particleGlow: boolean;
     particleRotation: number;
     particleRotationVariation: number;
@@ -95,7 +95,6 @@ export type EmitterObject = SceneObject & {
     particleColorOverLife: boolean;
     particleColorOverLifeTarget: string;
     particleSizeOverLife: string;
-      particleSeed?: number;
     showPathCurves?: boolean;
     pathCurveKeyCount?: number;
   };
@@ -189,7 +188,7 @@ const interpolateSceneObject = (from: SceneObject, to: SceneObject, t: number): 
 };
 
 export function App() {
-  const [appMode, setAppMode] = useState<'particle-system' | '3d-animator' | 'split'>('particle-system');
+  const [appMode, setAppMode] = useState<'particle-system' | '3d-animator'>('particle-system');
   const [showScenePropertiesPanel, setShowScenePropertiesPanel] = useState(true);
   const [leftPanelTab, setLeftPanelTab] = useState<'scene' | 'hierarchy'>('hierarchy');
   const [renamingObjectId, setRenamingObjectId] = useState<string | null>(null);
@@ -665,7 +664,6 @@ export function App() {
       particleColorOverLife: Boolean((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleColorOverLife ?? false),
       particleColorOverLifeTarget: String((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleColorOverLifeTarget ?? '#000000'),
       particleSizeOverLife: String((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleSizeOverLife ?? 'none'),
-        particleSeed: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleSeed ?? 0),
       showPathCurves: Boolean((selectedObject.properties as EmitterObject['properties'] | undefined)?.showPathCurves ?? false),
       pathCurveKeyCount: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.pathCurveKeyCount ?? 5),
     }
@@ -938,15 +936,20 @@ export function App() {
     setShowFileMenu(false);
   }, [addRecentFileEntry, applySceneData]);
 
-  const handleExportToParticleSystemNoSwitch = useCallback((dataUrls: string[]) => {
+  const handleExportToParticleSystem = useCallback((dataUrls: string[]) => {
+    setAppMode('particle-system');
+    
+    // Find either selected Emitter or first Emitter
     let targetId = selectedObjectId;
     let target = sceneObjects.find(obj => obj.id === targetId && obj.type === 'Emitter');
     if (!target) {
       target = sceneObjects.find(obj => obj.type === 'Emitter');
-      if (target) { targetId = target.id; }
+      if (target) {
+        targetId = target.id;
+      }
     }
 
-    if (targetId && target) {
+    if (target) {
       setSceneObjects(prev => prev.map(obj => {
         if (obj.id === target?.id) {
           return {
@@ -956,26 +959,62 @@ export function App() {
               particleType: 'sprites',
               particleSpriteSequenceDataUrls: dataUrls,
               particleSpriteSequenceFirstName: 'Rendered Animation',
-              particleSpriteSequenceFps: (obj.properties as any).particleSpriteSequenceFps || 24,
+              particleSpriteSequenceFps: 24,
               particleSpriteSequenceWaitFrames: 0,
             }
           };
         }
         return obj;
       }));
-      setSelectedObjectId(targetId);
+      setSelectedObjectId(target.id);
     } else {
-      const newObject: any = { id: `Emitter_${Date.now()}`, name: 'Animated Sprite Emitter', type: 'Emitter', position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 }, parentId: null };
-      newObject.properties = { emissionRate: 5, emitterType: 'point', emissionMode: 'volume', layerImageDataUrl: '', particleLifetime: 3, particleSpeed: 50, particleSpeedVariation: 0.2, particleSize: 5, particleSizeVariation: 0.2, particleColor: '#ffffff', particleColorVariation: 0.1, particleOpacity: 1, particleType: 'sprites', particleGlow: false, particleRotation: 0, particleRotationVariation: 0, particleRotationSpeed: 0, particleRotationSpeedVariation: 0, particleTextureUrl: '', particleTextureName: '', particleSpriteImageDataUrl: '', particleSpriteImageName: '', particleOpacityOverLife: false, particleColorOverLife: false, particleColorOverLifeTarget: '#000000', particleSizeOverLife: 'none', particleSpriteSequenceDataUrls: dataUrls, particleSpriteSequenceFirstName: 'Rendered Animation', particleSpriteSequenceFps: 24};
-      setSceneObjects(prev => [...prev, newObject]);
+      // Create new Emitter
+      const newObject: SceneObject = {
+        id: `Emitter_${Date.now()}`,
+        name: 'Animated Sprite Emitter',
+        type: 'Emitter',
+        position: { x: 0, y: 0, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+        parentId: null,
+      };
+      
+      (newObject as EmitterObject).properties = {
+        emissionRate: 5,
+        emitterType: 'point',
+        emissionMode: 'volume',
+        layerImageDataUrl: '',
+        particleLifetime: 3,
+        particleSpeed: 50,
+        particleSpeedVariation: 0.2,
+        particleSize: 5,
+        particleSizeVariation: 0.2,
+        particleColor: '#ffffff',
+        particleColorVariation: 0.1,
+        particleOpacity: 1,
+        particleType: 'sprites',
+        particleGlow: false,
+        particleRotation: 0,
+        particleRotationVariation: 0,
+        particleRotationSpeed: 0,
+        particleRotationSpeedVariation: 0,
+        particleTextureUrl: '',
+        particleTextureName: '',
+        particleSpriteImageDataUrl: '',
+        particleSpriteImageName: '',
+        particleOpacityOverLife: false,
+        particleColorOverLife: false,
+        particleColorOverLifeTarget: '#000000',
+        particleSizeOverLife: 'none',
+        particleSpriteSequenceDataUrls: dataUrls,
+        particleSpriteSequenceFirstName: 'Rendered Animation',
+        particleSpriteSequenceFps: 24,
+      };
+
+      setSceneObjects((prev) => [...prev, newObject]);
       setSelectedObjectId(newObject.id);
     }
   }, [sceneObjects, selectedObjectId]);
-
-  const handleExportToParticleSystem = useCallback((dataUrls: string[]) => {
-    setAppMode('particle-system');
-    handleExportToParticleSystemNoSwitch(dataUrls);
-  }, [handleExportToParticleSystemNoSwitch]);
 
   const handleCreateObject = useCallback((objectType: string) => {
     const newObject: SceneObject = {
@@ -1017,7 +1056,6 @@ export function App() {
         particleColorOverLife: false,
         particleColorOverLifeTarget: '#000000',
         particleSizeOverLife: 'none',
-          particleSeed: Math.floor(Math.random() * 1000000),
         showPathCurves: false,
         pathCurveKeyCount: 5,
       };
@@ -1695,9 +1733,7 @@ export function App() {
             3D Asset Creator Mode
           </div>
         </div>
-        <div className="main-content">
-          <Animator3D onExportToParticleSystem={handleExportToParticleSystem} />
-        </div>
+        <Animator3D onExportToParticleSystem={handleExportToParticleSystem} />
       </div>
     );
   }
@@ -1790,7 +1826,6 @@ export function App() {
             className="menu-button"
             onClick={() => setAppMode('3d-animator')}
             type="button"
-            style={{ backgroundColor: '#eeb868', color: '#1a1a1a', fontWeight: 'bold' }}
           >
             3D Asset Creator
           </button>
@@ -3306,7 +3341,6 @@ export function App() {
                           <option value="circles">Circles</option>
                           <option value="glow-circles">Glow Circles</option>
                           <option value="sprites">Sprites</option>
-                          <option value="3d-model">Live 3D Model</option>
                         </select>
 
                         <label htmlFor="particle-glow">
@@ -3380,24 +3414,6 @@ export function App() {
                               </button>
                             )}
                           </>
-                        )}
-
-                        {selectedEmitterProperties.particleType === '3d-model' && (
-                          <div className="live-3d-model-container" style={{ border: '1px solid #333', padding: '8px', marginTop: '12px', marginBottom: '12px', borderRadius: '4px', backgroundColor: '#1e1e1e' }}>
-                            <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: '#eeb868' }}>Live 3D Model Settings</h4>
-                            <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
-                              <Animator3D
-                                embeddedUI={true}
-                                autoRenderOnChange={true}
-                                onExportToParticleSystem={(dataUrls: string[], fps?: number) => {
-                                  // Update sprite sequence for emission
-                                  handleUpdateEmitterProperty('particleSpriteSequenceDataUrls', dataUrls);
-                                  handleUpdateEmitterProperty('particleSpriteSequenceFirstName', 'live-3d.png');
-                                  handleUpdateEmitterProperty('particleSpriteSequenceFps', fps ?? 24);
-                                }}
-                              />
-                            </div>
-                          </div>
                         )}
 
                         <label htmlFor="particle-speed">
@@ -3615,20 +3631,7 @@ export function App() {
                           <option value="none">None</option>
                           <option value="shrink">Shrink</option>
                           <option value="grow">Grow</option>
-                          </select>
-
-                          <label htmlFor="particle-seed">
-                            Random Seed: {selectedEmitterProperties.particleSeed ?? 0}
-                          </label>
-                          <input
-                            id="particle-seed"
-                            type="range"
-                            min="0"
-                            max="1000000"
-                            step="1"
-                            value={selectedEmitterProperties.particleSeed ?? 0}
-                            onChange={(event) => handleUpdateEmitterProperty('particleSeed', Number(event.target.value))}
-                          />
+                        </select>
 
                         <hr className="form-divider" />
 

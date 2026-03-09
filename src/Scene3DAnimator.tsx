@@ -920,7 +920,7 @@ case 'coin':
     const plateThickness = Math.max(1, depth * 0.5);
     const plateGeo = new THREE.CylinderGeometry(radius - fw/2, radius - fw/2, plateThickness, 64);
     plateGeo.rotateX(Math.PI / 2);
-    geometries.push(plateGeo);
+    geometries.push(plateGeo.toNonIndexed());
     
     const rimShape = new THREE.Shape();
     rimShape.absarc(0, 0, radius, 0, Math.PI * 2, false);
@@ -936,7 +936,7 @@ case 'coin':
         curveSegments: 64
     });
     rimExtrude.translate(0, 0, -fh/2);
-    geometries.push(rimExtrude);
+    geometries.push(rimExtrude.toNonIndexed());
     
     if (type !== 'none') {
         const shape = new THREE.Shape();
@@ -964,10 +964,15 @@ case 'coin':
             bevelSegments: 2
         });
         shapeGeo.translate(0, 0, -depth/2);
-        geometries.push(shapeGeo);
+        geometries.push(shapeGeo.toNonIndexed());
     }
     
+    geometries.forEach(g => {
+        g.deleteAttribute('uv');
+        g.deleteAttribute('normal');
+    });
     geometry = BufferGeometryUtils.mergeGeometries(geometries, false);
+    geometry.computeVertexNormals();
   }
   break;
 
