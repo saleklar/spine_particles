@@ -31,6 +31,8 @@ export interface GeneratorParams {
   rotSpeedX?: number;
   rotSpeedY?: number;
   rotSpeedZ?: number;
+  thermalBuoyancy?: number;
+  vorticityConfinement?: number;
 }
 
   export interface SavedPreset {
@@ -67,6 +69,8 @@ uniform vec3 flowDirection;
 uniform vec3 rotation;
 uniform float evolveOverLife;
 uniform vec3 rotationSpeed;
+uniform float thermalBuoyancy;
+uniform float vorticityConfinement;
 
 varying vec2 vUv;
 
@@ -159,7 +163,10 @@ float fbm(vec3 x) {
 
 float getDensity(vec3 p, float t) {
     vec3 np = p * scale * 0.5;
-    np -= flowDirection * t * 1.5;
+    // FDS Thermodynamics Approximation: Buoyancy causes vertical velocity to increase with height (temperature gradient)
+    vec3 advection = flowDirection * t * 1.5;
+    advection.y += (p.y + 1.0) * thermalBuoyancy * t * 2.0;
+    np -= advection;
     np = getRotationMatrix(rotation + rotationSpeed * t) * np;
 
     np.x += snoise3(np * 2.0 + vec3(0.0, -t, 0.0)) * distortion * 0.5;
@@ -343,6 +350,30 @@ export const FireGenerator: React.FC<FireGeneratorProps> = ({ onExport, onAttach
           noiseType: 'simplex', distortion: 3.5, detail: 1.8, alphaThreshold: 0.2
         }
       },
+      {
+        name: 'Scientific FDS Fire',
+        params: {
+          shapeType: 'ground',
+          color1: '#050000', // Blackbody core start
+          color2: '#e64000', // Heat transition
+          color3: '#ffe173', // Superheated core
+          speed: 2.0, scale: 4.0, coreBottom: 1.8, coreTop: 0.8,
+          brightness: 1.5, contrast: 1.2, saturation: 1.0,
+          frames: 64, fps: 30, resolution: 128,
+          noiseType: 'voronoi', distortion: 3.0, detail: 1.5, alphaThreshold: 0.1, thermalBuoyancy: 3.5, vorticityConfinement: 2.5
+        }
+      },
+      {
+        name: 'ForeFire Real-Time Simulation',
+        params: {
+          shapeType: 'ground',
+          color1: '#110000', color2: '#ff2200', color3: '#fff0aa',
+          speed: 1.2, scale: 2.5, coreBottom: 2.0, coreTop: 0.9,
+          brightness: 1.3, contrast: 1.1, saturation: 0.9,
+          frames: 64, fps: 60, resolution: 256,
+          noiseType: 'simplex', distortion: 4.0, detail: 2.0, alphaThreshold: 0.2, thermalBuoyancy: 1.2, vorticityConfinement: 4.0
+        }
+      },
       { name: 'Magic Blue Fire',
         params: {
           shapeType: 'ground',
@@ -440,6 +471,8 @@ const [params, setParams] = useState<GeneratorParams>(() => {
       fps: 30,
       resolution: 256,
       noiseType: 'voronoi' as 'simplex' | 'voronoi',
+      thermalBuoyancy: 1.0,
+      vorticityConfinement: 1.0,
       distortion: 0.8,
       detail: 1.0, alphaThreshold: 0.0, flowX: 0, flowY: 1, flowZ: 0, rotX: 0, rotY: 0, rotZ: 0
     };
@@ -494,7 +527,9 @@ const [params, setParams] = useState<GeneratorParams>(() => {
           evolveOverLife: { value: params.evolveOverLife ? 1.0 : 0.0 },
           flowDirection: { value: new THREE.Vector3(params.flowX || 0, params.flowY || 1.0, params.flowZ || 0) },
           rotation: { value: new THREE.Vector3(params.rotX || 0, params.rotY || 0, params.rotZ || 0) },
-            rotationSpeed: { value: new THREE.Vector3(params.rotSpeedX || 0, params.rotSpeedY || 0, params.rotSpeedZ || 0) }
+            rotationSpeed: { value: new THREE.Vector3(params.rotSpeedX || 0, params.rotSpeedY || 0, params.rotSpeedZ || 0) },
+          thermalBuoyancy: { value: params.thermalBuoyancy !== undefined ? params.thermalBuoyancy : 1.0 },
+          vorticityConfinement: { value: params.vorticityConfinement !== undefined ? params.vorticityConfinement : 1.0 }
         },
       transparent: true,
       blending: THREE.NormalBlending
@@ -551,6 +586,8 @@ const [params, setParams] = useState<GeneratorParams>(() => {
       materialRef.current.uniforms.noiseType.value = params.noiseType === 'voronoi' ? 1.0 : 0.0;
       materialRef.current.uniforms.distortion.value = params.distortion;
       materialRef.current.uniforms.detail.value = params.detail;
+      if(materialRef.current.uniforms.thermalBuoyancy) materialRef.current.uniforms.thermalBuoyancy.value = params.thermalBuoyancy !== undefined ? params.thermalBuoyancy : 1.0;
+      if(materialRef.current.uniforms.vorticityConfinement) materialRef.current.uniforms.vorticityConfinement.value = params.vorticityConfinement !== undefined ? params.vorticityConfinement : 1.0;
       
         materialRef.current.uniforms.alphaThreshold.value = params.alphaThreshold || 0.0;
         if (materialRef.current.uniforms.flowDirection) {
