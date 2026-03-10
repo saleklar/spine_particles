@@ -21,6 +21,8 @@ type SceneSettings = {
   particleBudget: number;
   particleSequenceBudget?: number;
   particleSequenceBudgetLoop?: boolean;
+  exportProjectionMode?: 'orthographic' | 'perspective';
+  cameraOrbitSpeed?: number;
   referenceImage?: string | null;
   referenceOpacity?: number;
   showGrid?: boolean;
@@ -1181,8 +1183,10 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
         // Update perspective camera position based on spherical coordinates
         const sin_phi = Math.sin(cameraState.phi);
         const cos_phi = Math.cos(cameraState.phi);
-        const sin_theta = Math.sin(cameraState.theta);
-        const cos_theta = Math.cos(cameraState.theta);
+        const orbitOffset = (sceneSettingsRef.current.cameraOrbitSpeed || 0) * (currentFrameRef.current / 24) * (Math.PI / 180);
+        const effectiveTheta = cameraState.theta + orbitOffset;
+        const sin_theta = Math.sin(effectiveTheta);
+        const cos_theta = Math.cos(effectiveTheta);
 
         orbitTarget.set(0, 0, 0);
         if (isDraggingTransformRef.current && dragOrbitTargetRef.current) {
@@ -3737,7 +3741,62 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
         for (const state of states) {
           const uniqueId = `${state.emitterId}_${state.trackId}`;
           if (!trackData.has(uniqueId)) trackData.set(uniqueId, []);
-          trackData.get(uniqueId)!.push({ frame: frameObj, state });
+          
+          let pushedState = state;
+          if (sceneSettings.exportProjectionMode === 'perspective' && perspectiveCameraRef.current) {
+            let cam = perspectiveCameraRef.current;
+            
+            if (sceneSettings.cameraOrbitSpeed) {
+                cam = cam.clone();
+                const orbitOffset = (sceneSettings.cameraOrbitSpeed || 0) * (frameObj / 24) * (Math.PI / 180);
+                const cameraState = cameraStateRef.current;
+                const effectiveTheta = cameraState.theta + orbitOffset;
+                const sin_phi = Math.sin(cameraState.phi);
+                const cos_phi = Math.cos(cameraState.phi);
+                const sin_theta = Math.sin(effectiveTheta);
+                const cos_theta = Math.cos(effectiveTheta);
+                const oTargetX = cameraState.viewOffsetX;
+                const oTargetY = cameraState.viewOffsetY;
+                const oTargetZ = cameraState.viewOffsetZ;
+                cam.position.x = oTargetX + cameraState.radius * sin_phi * sin_theta;
+                cam.position.y = oTargetY + cameraState.radius * cos_phi;
+                cam.position.z = oTargetZ + cameraState.radius * sin_phi * cos_theta;
+                cam.lookAt(oTargetX, oTargetY, oTargetZ);
+                cam.updateMatrixWorld();
+            }
+
+            const particlePos = new THREE.Vector3(state.position.x, state.position.y, state.position.z);
+            const particleVel = new THREE.Vector3(state.position.x + state.velocity.x, state.position.y + state.velocity.y, state.position.z + state.velocity.z);
+            
+            const dist = cam.position.length();
+            const fov = cam.fov;
+            const aspect = cam.aspect;
+            const scaleY = Math.tan(fov * Math.PI / 360) * dist;
+            const scaleX = scaleY * aspect;
+            
+            particlePos.project(cam);
+            particleVel.project(cam);
+            
+            const pDist = cam.position.distanceTo(new THREE.Vector3(state.position.x, state.position.y, state.position.z));
+            const distRatio = pDist > 0 ? (dist / pDist) : 1;
+
+            pushedState = {
+              ...state,
+              position: {
+                x: particlePos.x * scaleX,
+                y: particlePos.y * scaleY,
+                z: state.position.z
+              },
+              velocity: {
+                x: (particleVel.x - particlePos.x) * scaleX,
+                y: (particleVel.y - particlePos.y) * scaleY,
+                z: state.velocity.z
+              },
+              size: state.size * distRatio
+            };
+          }
+
+          trackData.get(uniqueId)!.push({ frame: frameObj, state: pushedState });
         }
       }
 
@@ -3894,11 +3953,46 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
               });
 
               const sizeScale = Math.max(0.05, state.size * 4) / 64;
+              let scaleCurveDefinition: any = curveDefinition;
+              if (!isLastKey) {
+                  const nextObj = bakedKeys[k + 1];
+                  const nextTime = nextObj.frame / 24;
+                  const dt = (nextTime - time) / 3;
+                  const nextSizeScale = Math.max(0.05, nextObj.state.size * 4) / 64;
+                  
+                  let curScaleVel = (nextSizeScale - sizeScale) / (nextTime - time);
+                  if (k > 0) {
+                      const prevObj = bakedKeys[k - 1];
+                      const prevTime = prevObj.frame / 24;
+                      const prevSizeScale = Math.max(0.05, prevObj.state.size * 4) / 64;
+                      curScaleVel = (nextSizeScale - prevSizeScale) / (nextTime - prevTime);
+                  }
+                  
+                  let nextScaleVel = curScaleVel;
+                  if (k < bakedKeys.length - 2) {
+                      const nextNextObj = bakedKeys[k + 2];
+                      const nextNextTime = nextNextObj.frame / 24;
+                      const nextNextSizeScale = Math.max(0.05, nextNextObj.state.size * 4) / 64;
+                      nextScaleVel = (nextNextSizeScale - sizeScale) / (nextNextTime - time);
+                  } else {
+                      nextScaleVel = (nextSizeScale - sizeScale) / (nextTime - time);
+                  }
+
+                  scaleCurveDefinition = {
+                      curve: [
+                          time + dt, Math.max(0.01, sizeScale + curScaleVel * dt),
+                          nextTime - dt, Math.max(0.01, nextSizeScale - nextScaleVel * dt),
+                          time + dt, Math.max(0.01, sizeScale + curScaleVel * dt),
+                          nextTime - dt, Math.max(0.01, nextSizeScale - nextScaleVel * dt)
+                      ]
+                  };
+              }
+
               boneAnim.scale.push({
                  time,
                  x: sizeScale,
                  y: sizeScale,
-                 curve: "linear"
+                 ...scaleCurveDefinition
               });
 
               boneAnim.rotate.push({

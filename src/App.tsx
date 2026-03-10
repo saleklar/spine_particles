@@ -17,6 +17,8 @@ type SceneSettings = {
   particleBudget: number;
   particleSequenceBudget: number;
   particleSequenceBudgetLoop: boolean;
+  exportProjectionMode: 'orthographic' | 'perspective';
+  cameraOrbitSpeed?: number;
 };
 
 export type SnapSettings = {
@@ -125,6 +127,8 @@ const DEFAULT_SCENE_SETTINGS: SceneSettings = {
   particleBudget: 500,
   particleSequenceBudget: 30,
   particleSequenceBudgetLoop: true,
+  exportProjectionMode: 'orthographic',
+  cameraOrbitSpeed: 0,
 };
 
 const DEFAULT_SNAP_SETTINGS: SnapSettings = {
@@ -2385,6 +2389,40 @@ export function App() {
                     />
                     Loop Animation to Fit Budget
                   </label>
+
+                  <label className="settings-label" style={{ marginTop: '10px' }} title="How particles are projected during Spine export. Orthographic is flat XY plane. Perspective uses the viewer camera.">
+                    Spine Export Projection Mode
+                  </label>
+                  <select
+                    className="settings-select"
+                    value={sceneSettings.exportProjectionMode ?? 'orthographic'}
+                    onChange={(event) => setSceneSettings((prev) => ({
+                      ...prev,
+                      exportProjectionMode: event.target.value as 'orthographic' | 'perspective',
+                    }))}
+                  >
+                    <option value="orthographic">Orthographic (Flat XY)</option>
+                    <option value="perspective">Perspective (Camera View)</option>
+                  </select>
+                  
+                  {sceneSettings.exportProjectionMode === 'perspective' && (
+                    <>
+                      <label className="settings-label" style={{ marginTop: '10px' }} title="Orbit speed of camera around origin during animation (degrees/sec)">
+                        Camera Orbit Speed (deg/sec)
+                      </label>
+                      <input
+                        type="number"
+                        className="settings-input"
+                        value={sceneSettings.cameraOrbitSpeed ?? 0}
+                        onChange={(event) => setSceneSettings((prev) => ({
+                          ...prev,
+                          cameraOrbitSpeed: parseFloat(event.target.value) || 0,
+                        }))}
+                        step="5"
+                      />
+                    </>
+                  )}
+
                 </div>
               )}
 
