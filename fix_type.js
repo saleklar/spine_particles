@@ -1,0 +1,1 @@
+const fs = require("fs"); let c = fs.readFileSync("src/App.tsx", "utf8"); c = c.replace(/particleType: .dots. \| .stars. \| .circles. \| .glow-circles. \| .sprites. \| .3d-model.;/g, "particleType: \"dots\" | \"stars\" | \"circles\" | \"glow-circles\" | \"sprites\" | \"3d-model\" | \"volumetric-fire\";"); fs.writeFileSync("src/App.tsx", c);

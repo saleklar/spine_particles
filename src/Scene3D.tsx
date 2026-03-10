@@ -4,6 +4,65 @@ import Stats from 'three/examples/jsm/libs/stats.module.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { SceneObject, EmitterObject, EmitterShapeObject, SnapSettings, PhysicsForce } from './App';
 
+// --- Simple 3D Noise for Turbulence ---
+const F3 = 1.0 / 3.0;
+const G3 = 1.0 / 6.0;
+const pNoise = new Uint8Array(256);
+for (let i = 0; i < 256; i++) pNoise[i] = Math.floor(Math.random() * 256);
+const p = new Uint8Array(512);
+for (let i = 0; i < 512; i++) p[i] = pNoise[i & 255];
+function dot(g: number[], x: number, y: number, z: number) { return g[0]*x + g[1]*y + g[2]*z; }
+const grad3 = [[1,1,0],[-1,1,0],[1,-1,0],[-1,-1,0],[1,0,1],[-1,0,1],[1,0,-1],[-1,0,-1],[0,1,1],[0,-1,1],[0,1,-1],[0,-1,-1]];
+function simplex3(xin: number, yin: number, zin: number) {
+  let n0, n1, n2, n3;
+  const s = (xin+yin+zin)*F3;
+  const i = Math.floor(xin+s); const j = Math.floor(yin+s); const k = Math.floor(zin+s);
+  const t = (i+j+k)*G3;
+  const X0 = i-t; const Y0 = j-t; const Z0 = k-t;
+  const x0 = xin-X0; const y0 = yin-Y0; const z0 = zin-Z0;
+  let i1, j1, k1, i2, j2, k2;
+  if(x0>=y0) { if(y0>=z0) { i1=1; j1=0; k1=0; i2=1; j2=1; k2=0; } else if(x0>=z0) { i1=1; j1=0; k1=0; i2=1; j2=0; k2=1; } else { i1=0; j1=0; k1=1; i2=1; j2=0; k2=1; } }
+  else { if(y0<z0) { i1=0; j1=0; k1=1; i2=0; j2=1; k2=1; } else if(x0<z0) { i1=0; j1=1; k1=0; i2=0; j2=1; k2=1; } else { i1=0; j1=1; k1=0; i2=1; j2=1; k2=0; } }
+  const x1 = x0 - i1 + G3; const y1 = y0 - j1 + G3; const z1 = z0 - k1 + G3;
+  const x2 = x0 - i2 + 2.0*G3; const y2 = y0 - j2 + 2.0*G3; const z2 = z0 - k2 + 2.0*G3;
+  const x3 = x0 - 1.0 + 3.0*G3; const y3 = y0 - 1.0 + 3.0*G3; const z3 = z0 - 1.0 + 3.0*G3;
+  const ii = i & 255; const jj = j & 255; const kk = k & 255;
+  const gi0 = p[ii+p[jj+p[kk]]] % 12;
+  const gi1 = p[ii+i1+p[jj+j1+p[kk+k1]]] % 12;
+  const gi2 = p[ii+i2+p[jj+j2+p[kk+k2]]] % 12;
+  const gi3 = p[ii+1+p[jj+1+p[kk+1]]] % 12;
+  let t0 = 0.6 - x0*x0 - y0*y0 - z0*z0; if(t0<0) n0 = 0.0; else { t0 *= t0; n0 = t0 * t0 * dot(grad3[gi0], x0, y0, z0); }
+  let t1 = 0.6 - x1*x1 - y1*y1 - z1*z1; if(t1<0) n1 = 0.0; else { t1 *= t1; n1 = t1 * t1 * dot(grad3[gi1], x1, y1, z1); }
+  let t2 = 0.6 - x2*x2 - y2*y2 - z2*z2; if(t2<0) n2 = 0.0; else { t2 *= t2; n2 = t2 * t2 * dot(grad3[gi2], x2, y2, z2); }
+  let t3 = 0.6 - x3*x3 - y3*y3 - z3*z3; if(t3<0) n3 = 0.0; else { t3 *= t3; n3 = t3 * t3 * dot(grad3[gi3], x3, y3, z3); }
+  return 32.0*(n0 + n1 + n2 + n3);
+}
+
+function curlNoise(x: number, y: number, z: number, scale: number) {
+  const e = 0.1;
+  const dx = new THREE.Vector3(e, 0.0, 0.0);
+  const dy = new THREE.Vector3(0.0, e, 0.0);
+  const dz = new THREE.Vector3(0.0, 0.0, e);
+
+  const n_x = simplex3(x/scale, y/scale, z/scale);
+  
+  // Fake quick curl using simplex offsets
+  const x0 = simplex3((x-e)/scale, y/scale, z/scale);
+  const x1 = simplex3((x+e)/scale, y/scale, z/scale);
+  const y0 = simplex3(x/scale, (y-e)/scale, z/scale);
+  const y1 = simplex3(x/scale, (y+e)/scale, z/scale);
+  const z0 = simplex3(x/scale, y/scale, (z-e)/scale);
+  const z1 = simplex3(x/scale, y/scale, (z+e)/scale);
+
+  const cx = ((y1 - y0) - (z1 - z0)) / (2.0 * e);
+  const cy = ((z1 - z0) - (x1 - x0)) / (2.0 * e);
+  const cz = ((x1 - x0) - (y1 - y0)) / (2.0 * e);
+
+  return new THREE.Vector3(cx, cy, cz).normalize();
+}
+// ----------------------------------------
+
+
 type SceneSize = {
   x: number;
   y: number;
@@ -99,6 +158,32 @@ const getResampledSequenceProps = (props: any, budget?: number, loop?: boolean) 
     return { urls: resampledUrls, fps };
 };
 
+
+function evaluateCurve(curveJson: string | undefined, progress: number, defaultValue: number = 1): number {
+  if (!curveJson) return defaultValue;
+  try {
+    const points = JSON.parse(curveJson);
+    if (!Array.isArray(points) || points.length === 0) return defaultValue;
+    if (points.length === 1) return points[0].y;
+    
+    let sortedPoints = [...points].sort((a, b) => a.x - b.x);
+
+    if (progress <= sortedPoints[0].x) return sortedPoints[0].y;
+    if (progress >= sortedPoints[sortedPoints.length - 1].x) return sortedPoints[sortedPoints.length - 1].y;
+
+    for (let i = 0; i < sortedPoints.length - 1; i++) {
+        if (progress >= sortedPoints[i].x && progress <= sortedPoints[i + 1].x) {
+            const range = sortedPoints[i + 1].x - sortedPoints[i].x;
+            if (range === 0) return sortedPoints[i].y;
+            const t = (progress - sortedPoints[i].x) / range;
+            return sortedPoints[i].y + t * (sortedPoints[i + 1].y - sortedPoints[i].y);
+        }
+    }
+  } catch(e) {
+  }
+  return defaultValue;
+}
+
 export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneSettings, snapSettings, viewMode, onViewModeChange, sceneObjects, currentFrame, isPlaying, isCaching, physicsForces, selectedObjectId, selectedForceId, onObjectSelect, onForceSelect, onObjectTransform, onForceTransform, handleScale = 1.0, onCacheFrameCountChange, cacheResetToken = 0, onUpdateSceneSettings }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -171,7 +256,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
       opacityOverLife?: boolean;
       colorOverLife?: boolean;
       colorOverLifeTarget?: string;
-      sizeOverLife?: 'none' | 'shrink' | 'grow';
+      sizeOverLife?: string;
       positionHistory?: THREE.Vector3[];
     }>;
     lastEmit: number;
@@ -1409,7 +1494,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
         return texture;
       };
 
-      const resolveSpriteTexture = (imageDataUrl: string, sequenceDataUrls: string[], age: number, fps: number = 12) => {
+      const resolveSpriteTexture = (imageDataUrl: string, sequenceDataUrls: string[], age: number, fps: number = 12, mode: string = 'loop', particleLifetime: number = 1) => {
         const validSequence = Array.isArray(sequenceDataUrls)
           ? sequenceDataUrls.filter((url) => typeof url === 'string' && url.length > 0)
           : [];
@@ -1564,7 +1649,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
           const emitterSpriteSequenceFps = seqProps.fps;
           const restoredSpeedMultiplier = 1 - emitterRotationSpeedVariation * 0.5 + Math.random() * emitterRotationSpeedVariation;
           const restoredSpriteTexture = (emitterParticleType === 'sprites' || emitterParticleType === '3d-model')
-            ? resolveSpriteTexture(emitterSpriteImageDataUrl, emitterSpriteSequenceDataUrls, cached.age, emitterSpriteSequenceFps)
+            ? resolveSpriteTexture(emitterSpriteImageDataUrl, emitterSpriteSequenceDataUrls, cached.age, emitterSpriteSequenceFps, String(emitterProps.particleSpriteSequenceMode ?? 'loop'), Number(emitterProps.particleLifetime ?? 3))
             : undefined;
           const previewedType = getPreviewedParticleType(emitterParticleType);
           const previewedColor = getPreviewedParticleColor(emitterColor);
@@ -1648,7 +1733,8 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
                 if (source.type === 'Circle') return 'circle';
                 if (source.type === 'Rectangle' || source.type === 'Triangle' || source.type === 'Polygon' || source.type === 'Plane') return 'square';
                 if (source.type === 'Line' || source.type === 'Arc') return 'curve';
-                if (source.type === 'Cylinder' || source.type === 'Cone' || source.type === 'Torus') return 'ball';
+                                  if (source.type === 'Cylinder' || source.type === 'Cone' || source.type === 'Torus') return 'ball';
+                  if (source.type === 'Spine' || source.type === 'Animator3D' || source.type === '3DModel') return 'mesh_bounds';
                 return 'point';
               };
 
@@ -1796,9 +1882,50 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
                       localNormal.copy(localOffset).normalize();
                     }
                   }
-                } else if (emitterType === 'point') {
-                  localNormal.set(0, -0.5, 1).normalize();
-                } else if (emitterType === 'layer') {
+                                  } else if (emitterType === 'mesh_bounds') {
+                    sourceMesh.updateMatrixWorld(true);
+                    let lx = 0, ly = 0, lz = 0;
+                    
+                    const globalBox = new THREE.Box3().setFromObject(sourceMesh);
+                    if (!globalBox.isEmpty()) {
+                        const size = new THREE.Vector3();
+                        globalBox.getSize(size);
+                        
+                        const worldX = globalBox.min.x + Math.random() * size.x;
+                        const worldY = globalBox.min.y + Math.random() * size.y;
+                        const worldZ = globalBox.min.z + Math.random() * size.z;
+                        let worldPos = new THREE.Vector3(worldX, worldY, worldZ);
+                        
+                        if (isEdgeMode || isSurfaceMode) {
+                            const c = new THREE.Vector3();
+                            globalBox.getCenter(c);
+                            const dx = worldX - c.x;
+                            const dy = worldY - c.y;
+                            const dz = worldZ - c.z;
+                            const nx = Math.abs(dx) / (size.x/2);
+                            const ny = Math.abs(dy) / (size.y/2);
+                            const nz = Math.abs(dz) / (size.z/2);
+                            const m = Math.max(nx, ny, nz);
+                            if (m === nx) worldPos.x = c.x + Math.sign(dx) * size.x / 2;
+                            else if (m === ny) worldPos.y = c.y + Math.sign(dy) * size.y / 2;
+                            else worldPos.z = c.z + Math.sign(dz) * size.z / 2;
+                        }
+                        
+                        const smWorldPos = new THREE.Vector3();
+                        sourceMesh.getWorldPosition(smWorldPos);
+                        
+                        const diff = worldPos.clone().sub(smWorldPos);
+                        diff.applyEuler(new THREE.Euler(-sourceMesh.rotation.x, -sourceMesh.rotation.y, -sourceMesh.rotation.z));
+                        diff.set(diff.x / sourceMesh.scale.x, diff.y / sourceMesh.scale.y, diff.z / sourceMesh.scale.z);
+                        
+                        lx = diff.x; ly = diff.y; lz = diff.z;
+                    }
+
+                    localOffset.set(lx, ly, lz);
+                    localNormal.set(0, 1, 0);
+                  } else if (emitterType === 'point') {
+                    localNormal.set(0, -0.5, 1).normalize();
+                  } else if (emitterType === 'layer') {
                   if (isEdgeMode) {
                     const side = Math.floor(Math.random() * 4);
                     const t = (Math.random() * 2 - 1) * sourceExtent;
@@ -1858,7 +1985,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
                 const particleRotationSpeedMultiplier = 1 - emitterRotationSpeedVariation * 0.5 + Math.random() * emitterRotationSpeedVariation;
                 const particleRotationSpeed = emitterRotationSpeed * particleRotationSpeedMultiplier;
                 const spawnSpriteTexture = (emitterParticleType === 'sprites' || emitterParticleType === '3d-model')
-                  ? resolveSpriteTexture(emitterSpriteImageDataUrl, emitterSpriteSequenceDataUrls, 0, emitterSpriteSequenceFps)
+                  ? resolveSpriteTexture(emitterSpriteImageDataUrl, emitterSpriteSequenceDataUrls, 0, emitterSpriteSequenceFps, String(emitterProps.particleSpriteSequenceMode ?? 'loop'), Number(emitterProps.particleLifetime ?? 3))
                   : undefined;
                 const previewedType = getPreviewedParticleType(emitterParticleType);
                 const previewedColor = getPreviewedParticleColor(particleColor);
@@ -2092,16 +2219,31 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
                           particle.velocity.multiplyScalar(dampingFactor);
                           break;
                           
-                        case 'turbulence':
-                          const turbNoise = {
-                            x: (Math.random() - 0.5) * 2,
-                            y: (Math.random() - 0.5) * 2,
-                            z: (Math.random() - 0.5) * 2,
-                          };
-                          particle.velocity.add(
-                            new THREE.Vector3(turbNoise.x, turbNoise.y, turbNoise.z).multiplyScalar(force.strength * deltaTime)
-                          );
-                          break;
+                        case 'turbulence': {
+                            const noiseScale = force.radius || 20.0;
+                            const timeDrift = Date.now() * 0.001 * 0.5;
+                            const curl = curlNoise(
+                                particlePos.x,
+                                particlePos.y + timeDrift * 10,
+                                particlePos.z,
+                                noiseScale
+                            );
+                            particle.velocity.addScaledVector(curl, force.strength * deltaTime);
+                            break;
+                          }
+
+                          case 'thermal-updraft': {
+                            const lifeRatio = 1.0 - (particle.age / (particle.lifetime || 1.0));
+                            const heatMultiplier = Math.max(0.1, lifeRatio);
+                            particle.velocity.y += force.strength * heatMultiplier * deltaTime;
+
+                            const d = directionToParticle.clone();
+                            d.y = 0;
+                            if (d.lengthSq() > 0.01) {
+                                particle.velocity.addScaledVector(d.normalize(), force.strength * 0.1 * heatMultiplier * deltaTime);
+                            }
+                            break;
+                          }
                           
                         case 'flow-curve':
                           // For now, apply directional flow if direction is set
@@ -2174,12 +2316,8 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
                 if (needsMeshSwap) {
                   const existingMaterial = getParticleMaterial(particle.mesh);
                   const replacementSpriteTexture = (emitterParticleType === 'sprites' || emitterParticleType === '3d-model')
-                    ? resolveSpriteTexture(
-                      particle.spriteImageDataUrl ?? '',
-                      particle.spriteSequenceDataUrls ?? [],
-                      particle.age,
-                      currentEmitterFps
-                    )
+                    ? resolveSpriteTexture(particle.spriteImageDataUrl ?? '', particle.spriteSequenceDataUrls ?? [], particle.age, currentEmitterFps
+                    , String(emitterProps.particleSpriteSequenceMode ?? 'loop'), particle.lifetime)
                     : undefined;
                   const replacementMesh = createParticleMesh(
                     particle.mesh.position.clone(),
@@ -2209,19 +2347,21 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
                   material.needsUpdate = true;
                 }
 
-                if (particle.opacityOverLife) {
-                  material.opacity = (particle.baseOpacity ?? 0.8) * (1 - progress);
-                } else {
-                  material.opacity = particle.baseOpacity ?? 0.8;
-                }
+                if (emitterProps.particleOpacityOverLifeCurve && !particle.opacityOverLife) {
+                    const curveValue = evaluateCurve(emitterProps.particleOpacityOverLifeCurve, progress, 1);
+                    material.opacity = (particle.baseOpacity ?? 0.8) * curveValue;
+                  } else if (emitterProps.particleOpacityOverLifeCurve && !particle.opacityOverLife) {
+                    const curveValue = evaluateCurve(emitterProps.particleOpacityOverLifeCurve, progress, 1);
+                    material.opacity = (particle.baseOpacity ?? 0.8) * curveValue;
+                  } else if (particle.opacityOverLife) {
+                    material.opacity = (particle.baseOpacity ?? 0.8) * (1 - progress);
+                  } else {
+                    material.opacity = particle.baseOpacity ?? 0.8;
+                  }
 
                 if ((effectiveParticleType === 'sprites' || effectiveParticleType === '3d-model')) {
-                  const spriteTexture = resolveSpriteTexture(
-                    particle.spriteImageDataUrl ?? '',
-                    particle.spriteSequenceDataUrls ?? [],
-                    particle.age,
-                    currentEmitterFps
-                  );
+                  const spriteTexture = resolveSpriteTexture(particle.spriteImageDataUrl ?? '', particle.spriteSequenceDataUrls ?? [], particle.age, currentEmitterFps
+                  , String(emitterProps.particleSpriteSequenceMode ?? 'loop'), particle.lifetime);
                   if (material.map !== (spriteTexture ?? null)) {
                     material.map = spriteTexture ?? null;
                     material.needsUpdate = true;
@@ -2246,13 +2386,19 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
                 const baseSize = particle.baseSize ?? 3;
                 if (isWhiteDotPreview) {
                   setParticleSize(particle.mesh, previewDotSize);
-                } else if (sizeOverLife === 'shrink') {
-                  setParticleSize(particle.mesh, baseSize * (1 - progress));
-                } else if (sizeOverLife === 'grow') {
-                  setParticleSize(particle.mesh, baseSize * (0.5 + progress * 0.5));
-                } else {
-                  setParticleSize(particle.mesh, baseSize);
-                }
+                } else if (sizeOverLife === 'curve') {
+                    const curveValue = evaluateCurve(emitterProps?.particleSizeOverLifeCurve, progress, 1);
+                    setParticleSize(particle.mesh, baseSize * curveValue);
+                  } else if (sizeOverLife === 'curve') {
+                    const curveValue = evaluateCurve(emitterProps?.particleSizeOverLifeCurve, progress, 1);
+                    setParticleSize(particle.mesh, baseSize * curveValue);
+                  } else if (sizeOverLife === 'shrink') {
+                    setParticleSize(particle.mesh, baseSize * (1 - progress));
+                  } else if (sizeOverLife === 'grow') {
+                    setParticleSize(particle.mesh, baseSize * (0.5 + progress * 0.5));
+                  } else {
+                    setParticleSize(particle.mesh, baseSize);
+                  }
               }
             }
           }
@@ -3005,7 +3151,11 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
         case 'turbulence':
           // Turbulence is chaotic, use neutral indicator
           direction.set(1, 0, 0);
-          color = 0x00ccff; // Light cyan for turbulence
+          color = 0x8800ff; // Purple for turbulence
+          break;
+        case 'thermal-updraft':
+          direction.set(0, 1, 0); // Always up
+          color = 0xff3300; // Deep Orange for heat
           break;
       }
       

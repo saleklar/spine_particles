@@ -1,0 +1,1 @@
+const fs = require('fs'); let C = fs.readFileSync('src/FireGenerator.tsx', 'utf8'); C = C.replace('clamp(alphaThreshold, 0.0, 1.0));\\n            stepAlpha = pow', 'clamp(alphaThreshold, 0.0, 1.0));\n            stepAlpha = pow'); fs.writeFileSync('src/FireGenerator.tsx', C);

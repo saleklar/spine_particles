@@ -1,0 +1,1 @@
+const fs = require('fs'); let C = fs.readFileSync('src/FireGenerator.tsx', 'utf8'); C = C.replace('      },\\n      {\\n\\n      {\\n        name:', '      },\\n      {\\n        name:'); fs.writeFileSync('src/FireGenerator.tsx', C);

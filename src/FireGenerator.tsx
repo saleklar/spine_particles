@@ -1,0 +1,1067 @@
+import React, { useRef, useEffect, useState } from 'react';
+import * as THREE from 'three';
+import JSZip from 'jszip';
+
+export interface GeneratorParams {
+  shapeType: 'ground' | 'fireball' | 'wisp';
+  color1: string;
+  color2: string;
+  color3: string;
+  speed: number;
+  scale: number;
+  coreBottom: number;
+  coreTop: number;
+  brightness: number;
+  contrast: number;
+  saturation: number;
+  frames: number;
+  fps: number;
+  resolution: number;
+  noiseType: 'simplex' | 'voronoi';
+  distortion: number;
+  detail: number;
+  alphaThreshold: number;
+    evolveOverLife?: boolean;
+    flowX: number;
+    flowY: number;
+    flowZ: number;
+    rotX: number;
+    rotY: number;
+    rotZ: number;
+  rotSpeedX?: number;
+  rotSpeedY?: number;
+  rotSpeedZ?: number;
+}
+
+  export interface SavedPreset {
+    name: string;
+    params: GeneratorParams;
+  }
+
+  export const vertexShader = `
+  varying vec2 vUv;
+  void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+export const fragmentShader = `
+uniform float loopProgress;
+uniform float speed;
+uniform float scale;
+uniform float coreBottom;
+uniform float coreTop;
+uniform float shapeType;
+uniform float brightness;
+uniform float contrast;
+uniform float saturation;
+uniform vec3 color1;
+uniform vec3 color2;
+uniform vec3 color3;
+uniform float noiseType;
+uniform float distortion;
+uniform float detail;
+uniform float alphaThreshold;
+uniform vec3 flowDirection;
+uniform vec3 rotation;
+uniform float evolveOverLife;
+uniform vec3 rotationSpeed;
+
+varying vec2 vUv;
+
+mat3 getRotationMatrix(vec3 rot) {
+    float cx = cos(rot.x), sx = sin(rot.x);
+    float cy = cos(rot.y), sy = sin(rot.y);
+    float cz = cos(rot.z), sz = sin(rot.z);
+
+    mat3 rx = mat3(
+        1.0, 0.0, 0.0,
+        0.0, cx, -sx,
+        0.0, sx, cx
+    );
+
+    mat3 ry = mat3(
+        cy, 0.0, sy,
+        0.0, 1.0, 0.0,
+        -sy, 0.0, cy
+    );
+
+    mat3 rz = mat3(
+        cz, -sz, 0.0,
+        sz, cz, 0.0,
+        0.0, 0.0, 1.0
+    );
+
+    return rz * ry * rx;
+}
+
+// --- 3D Simplex Noise ---
+vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+vec4 permute(vec4 x) { return mod289(((x*34.0)+1.0)*x); }
+vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+
+float snoise3(vec3 v) {
+  const vec2  C = vec2(1.0/6.0, 1.0/3.0) ;
+  const vec4  D = vec4(0.0, 0.5, 1.0, 2.0);
+  vec3 i  = floor(v + dot(v, C.yyy) );
+  vec3 x0 = v - i + dot(i, C.xxx) ;
+  vec3 g = step(x0.yzx, x0.xyz);
+  vec3 l = 1.0 - g;
+  vec3 i1 = min( g.xyz, l.zxy );
+  vec3 i2 = max( g.xyz, l.zxy );
+  vec3 x1 = x0 - i1 + C.xxx;
+  vec3 x2 = x0 - i2 + C.yyy;
+  vec3 x3 = x0 - D.yyy;
+  i = mod289(i);
+  vec4 p = permute( permute( permute(
+             i.z + vec4(0.0, i1.z, i2.z, 1.0 ))
+           + i.y + vec4(0.0, i1.y, i2.y, 1.0 ))
+           + i.x + vec4(0.0, i1.x, i2.x, 1.0 ));
+  float n_ = 0.142857142857;
+  vec3  ns = n_ * D.wyz - D.xzx;
+  vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
+  vec4 x_ = floor(j * ns.z);
+  vec4 y_ = floor(j - 7.0 * x_ );
+  vec4 x = x_ *ns.x + ns.yyyy;
+  vec4 y = y_ *ns.x + ns.yyyy;
+  vec4 h = 1.0 - abs(x) - abs(y);
+  vec4 b0 = vec4( x.xy, y.xy );
+  vec4 b1 = vec4( x.zw, y.zw );
+  vec4 s0 = floor(b0)*2.0 + 1.0;
+  vec4 s1 = floor(b1)*2.0 + 1.0;
+  vec4 sh = -step(h, vec4(0.0));
+  vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy ;
+  vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww ;
+  vec3 p0 = vec3(a0.xy,h.x);
+  vec3 p1 = vec3(a0.zw,h.y);
+  vec3 p2 = vec3(a1.xy,h.z);
+  vec3 p3 = vec3(a1.zw,h.w);
+  vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2, p2), dot(p3,p3)));
+  p0 *= norm.x; p1 *= norm.y; p2 *= norm.z; p3 *= norm.w;
+  vec4 m = max(0.5 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
+  m = m * m;
+  return 105.0 * dot( m*m, vec4( dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3) ) );
+}
+
+float fbm(vec3 x) {
+    float v = 0.0;
+    float a = 0.5;
+    vec3 shift = vec3(100.0);
+    for (int i = 0; i < 4; ++i) {
+        v += a * snoise3(x);
+        x = x * 2.0 + shift;
+        a *= 0.5;
+    }
+    return v;
+}
+
+float getDensity(vec3 p, float t) {
+    vec3 np = p * scale * 0.5;
+    np -= flowDirection * t * 1.5;
+    np = getRotationMatrix(rotation + rotationSpeed * t) * np;
+
+    np.x += snoise3(np * 2.0 + vec3(0.0, -t, 0.0)) * distortion * 0.5;
+    np.z += snoise3(np * 2.0 + vec3(0.0, -t, t)) * distortion * 0.5;
+
+    float n = fbm(np);
+    float mask = 0.0;
+
+    if (shapeType > 1.5) {
+        float r = length(p.xz);
+        float ny = p.y;
+        vec3 warp = vec3(fbm(np * 2.0 + t), fbm(np * 2.5 - t), fbm(np * 2.0));
+        np += warp * (detail * 0.4);
+        n = fbm(np);
+        float taper = smoothstep(1.0, 0.2, abs(ny));
+        float width = 0.6 * taper;
+        vec3 shapeDist = p;
+        shapeDist.x += snoise3(vec3(p.y * 3.0, t * 2.0, 0.0)) * distortion * 0.2;
+        shapeDist.z += snoise3(vec3(0.0, t * 2.0, p.y * 3.0)) * distortion * 0.2;
+        float distFromCenter = abs(shapeDist.x) + abs(shapeDist.z)*0.5;
+        mask = 1.0 - smoothstep(width * 0.05, width + 0.2, distFromCenter);
+        mask *= taper;
+    } else if (shapeType > 0.5) {
+        float d = length(p);
+        mask = 1.0 - smoothstep(0.4, 0.9, d);
+    } else {
+        float r = length(p.xz);
+        float ny = (p.y + 0.9) * 0.52;
+        float powY = pow(max(0.0, ny), 1.2);
+        float width = mix(0.7, 0.05, powY);
+        mask = 1.0 - smoothstep(width * 0.1, width, r);
+        float topFade = 1.0 - smoothstep(0.55, 1.0, ny);
+        float bottomPinch = smoothstep(0.0, 0.2, ny);
+        mask *= topFade * mix(0.4, 1.0, bottomPinch);
+    }
+
+    mask *= smoothstep(-1.0, -0.7, p.y);
+
+    float density = (n * 0.5 + 0.5) * mask;
+    return pow(max(0.0, density), mix(coreBottom, coreTop, p.y * 0.5 + 0.5));
+}
+
+vec4 computeVolumetric(float timePhase) {
+    float t = timePhase * speed * 2.0;
+    vec2 uv = (vUv - 0.5) * 2.0;
+
+    vec3 rayOrigin = vec3(uv.x, uv.y, 1.0);
+    vec3 rayDir = vec3(0.0, 0.0, -1.0);
+
+    float tStep = 0.04;
+    float tMax = 2.0;
+    float currentT = 0.0;
+
+    float T = 1.0;
+    vec3 finalColor = vec3(0.0);
+
+    for(int i=0; i < 50; i++) {
+        vec3 p = rayOrigin + rayDir * currentT;
+
+        if (abs(p.x) > 1.0 || abs(p.y) > 1.0 || abs(p.z) > 1.0) {
+            currentT += tStep;
+            continue;
+        }
+
+        float density = getDensity(p, t);
+
+        if(density > 0.01) {
+            vec3 fireColor = mix(color1, color2, smoothstep(0.1, 0.5, density));
+            fireColor = mix(fireColor, color3, smoothstep(0.5, 0.9, density));
+
+            float hot = pow(density, 6.0) * detail;
+            fireColor += vec3(1.0, 0.8, 0.4) * hot;
+
+            float smokeMask = smoothstep(0.3, 0.0, density) * smoothstep(0.0, 1.0, p.y+0.5) * 0.5;
+            fireColor = mix(fireColor, vec3(0.02), smokeMask);
+
+            float erosionNoise = snoise3(p * scale * 2.0 - vec3(0.0, t*1.5, 0.0));
+            if (noiseType > 0.5) erosionNoise = abs(erosionNoise);
+            float erosionThreshold = alphaThreshold * mix(1.0, erosionNoise * 0.5 + 0.5, clamp(distortion * 0.5, 0.0, 1.0));
+            float stepAlpha = max(0.0, density - erosionThreshold) * mix(8.0, 30.0, clamp(alphaThreshold, 0.0, 1.0));
+            stepAlpha = pow(stepAlpha, mix(0.7, 1.5, clamp(alphaThreshold, 0.0, 1.0)));
+            finalColor += T * fireColor * stepAlpha * tStep;
+            T *= exp(-stepAlpha * tStep * mix(1.0, 8.0, smokeMask));
+
+            if(T < 0.01) break;
+        }
+
+        currentT += tStep;
+        if(currentT > tMax) break;
+    }
+
+    float alpha = 1.0 - T;
+    return vec4(finalColor, alpha);
+}
+
+void main() {
+    vec4 outColor;
+    float currentBrightness = brightness;
+    float currentContrast = contrast;
+    float currentAlphaThreshold = alphaThreshold;
+
+    if (evolveOverLife > 0.5) {
+        float lp = loopProgress;
+        currentBrightness = mix(brightness * 2.0, brightness * 0.1, lp);
+        currentContrast = mix(contrast * 1.5, contrast * 0.5, lp);
+
+        if (distortion < 0.1) {
+             currentAlphaThreshold = mix(alphaThreshold, alphaThreshold + 0.1, lp);
+        } else {
+             currentAlphaThreshold = mix(alphaThreshold - 0.1, alphaThreshold + 0.6, pow(lp, 1.5));
+        }
+        outColor = computeVolumetric(lp);
+    } else {
+        float p1 = fract(loopProgress);
+        float p2 = fract(loopProgress + 0.5);
+
+        vec4 v1 = computeVolumetric(p1);
+        vec4 v2 = computeVolumetric(p2);
+
+        float w1 = sin(p1 * 3.14159265);
+        float w2 = sin(p2 * 3.14159265);
+        float w1_sq = w1 * w1;
+        float w2_sq = w2 * w2;
+
+        outColor = v1 * w1_sq + v2 * w2_sq;
+    }
+
+    vec3 c = outColor.rgb * currentBrightness;
+    c = (c - 0.5) * currentContrast + 0.5;
+    float lum = dot(c, vec3(0.299, 0.587, 0.114));
+    c = mix(vec3(lum), c, saturation);
+
+    float baseAlpha = pow(clamp(outColor.a, 0.0, 1.0), mix(0.7, 0.8, clamp(outColor.a, 0.0, 1.0)));
+    float a = baseAlpha * mix(1.5, 2.5, clamp(currentAlphaThreshold, 0.0, 1.0));
+
+    if (evolveOverLife > 0.5 && distortion < 0.1) {
+        a *= (1.0 - pow(loopProgress, 4.0));
+    }
+
+    gl_FragColor = vec4(clamp(c, 0.0, 1.0), clamp(a, 0.0, 1.0));
+}
+`;
+
+export type FireGeneratorProps = { embeddedUI?: boolean; onExportToParticleSystem?: (dataUrls: string[], fps: number) => void; autoRenderOnChange?: boolean;
+  onExport: (blob: Blob, name: string) => void;
+  onAttachToEmitter?: (dataUrls: string[]) => void;
+};
+
+export const FireGenerator: React.FC<FireGeneratorProps> = ({ onExport, onAttachToEmitter, embeddedUI, onExportToParticleSystem, autoRenderOnChange }) => {
+  const mountRef = useRef<HTMLDivElement>(null);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const materialRef = useRef<THREE.ShaderMaterial | null>(null);
+  const sceneRef = useRef<THREE.Scene | null>(null);
+  const cameraRef = useRef<THREE.OrthographicCamera | null>(null);
+  
+  
+  const [savedPresets, setSavedPresets] = useState<SavedPreset[]>(() => {
+    const saved = localStorage.getItem('fireGeneratorSavedPresets');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) {}
+    }
+    return [
+      {
+        name: 'Default Campfire',
+        params: {
+          shapeType: 'ground',
+          color1: '#ff0000', color2: '#ff6600', color3: '#ffff00',
+          speed: 3.0, scale: 3.0, coreBottom: 1.5, coreTop: 1.0,
+          brightness: 1.0, contrast: 1.0, saturation: 1.0,
+          frames: 64, fps: 30, resolution: 128,
+          noiseType: 'simplex', distortion: 2.0, detail: 1.0, alphaThreshold: 0.0, flowX: 0, flowY: 1, flowZ: 0, rotX: 0, rotY: 0, rotZ: 0
+        }
+      },
+      { name: 'Plasma Wisp (Details)',
+        params: {
+          shapeType: 'wisp',
+          color1: '#550000', color2: '#ff3300', color3: '#ffffff',
+          speed: 4.0, scale: 3.5, coreBottom: 1.0, coreTop: 1.0,
+          brightness: 1.8, contrast: 1.4, saturation: 1.2,
+          frames: 64, fps: 30, resolution: 128,
+          noiseType: 'simplex', distortion: 3.5, detail: 1.8, alphaThreshold: 0.2
+        }
+      },
+      { name: 'Magic Blue Fire',
+        params: {
+          shapeType: 'ground',
+          color1: '#0000ff', color2: '#00ffff', color3: '#ffffff',
+          speed: 4.0, scale: 2.5, coreBottom: 2.0, coreTop: 1.2,
+          brightness: 1.2, contrast: 1.1, saturation: 1.5,
+          frames: 64, fps: 30, resolution: 128,
+          noiseType: 'simplex', distortion: 2.5, detail: 1.2
+        }
+      }
+    ];
+  });
+
+  useEffect(() => {
+    localStorage.setItem('fireGeneratorSavedPresets', JSON.stringify(savedPresets));
+  }, [savedPresets]);
+
+  const [presetName, setPresetName] = useState('');
+  const [selectedPresetIndex, setSelectedPresetIndex] = useState<number | ''>('');
+
+  const handleSavePreset = () => {
+    if (!presetName.trim()) return;
+    const newPreset = { name: presetName.trim(), params: { ...params } };
+    setSavedPresets([...savedPresets, newPreset]);
+    setPresetName('');
+    setSelectedPresetIndex(savedPresets.length); // the new one
+  };
+
+  const handleLoadPreset = (index: number) => {
+    if (index >= 0 && index < savedPresets.length) {
+      
+  const p = {...savedPresets[index].params};
+  if (p.flowX === undefined) p.flowX = 0;
+  if (p.flowY === undefined) p.flowY = 1;
+  if (p.flowZ === undefined) p.flowZ = 0;
+  if (p.rotX === undefined) p.rotX = 0;
+  if (p.rotY === undefined) p.rotY = 0;
+  if (p.rotZ === undefined) p.rotZ = 0;
+  setParams(p);
+
+      setSelectedPresetIndex(index);
+    }
+  };
+
+  const handleDeletePreset = (index: number) => {
+    if (confirm('Delete preset: ' + savedPresets[index].name + '?')) {
+      const newPresets = [...savedPresets];
+      newPresets.splice(index, 1);
+      setSavedPresets(newPresets);
+      if (selectedPresetIndex === index) {
+        setSelectedPresetIndex('');
+      } else if (typeof selectedPresetIndex === 'number' && selectedPresetIndex > index) {
+        setSelectedPresetIndex(selectedPresetIndex - 1);
+      }
+    }
+  };
+const [params, setParams] = useState<GeneratorParams>(() => {
+    const saved = localStorage.getItem('fireGeneratorParams');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed.core !== undefined && parsed.coreBottom === undefined) {
+          parsed.coreBottom = parsed.core;
+          parsed.coreTop = parsed.core;
+        } else if (parsed.coreBottom === undefined) {
+          parsed.coreBottom = 1.5;
+          parsed.coreTop = 1.0;
+        }
+        
+          if (parsed.flowX === undefined) parsed.flowX = 0;
+          if (parsed.flowY === undefined) parsed.flowY = 1;
+          if (parsed.flowZ === undefined) parsed.flowZ = 0;
+          if (parsed.rotX === undefined) parsed.rotX = 0;
+          if (parsed.rotY === undefined) parsed.rotY = 0;
+          if (parsed.rotZ === undefined) parsed.rotZ = 0;
+          return parsed;
+
+      } catch (e) {
+        console.error('Failed to parse saved fire generator params', e);
+      }
+    }
+    return {
+      shapeType: 'ground' as 'ground' | 'fireball',
+      color1: '#ff0000', // darkest red
+      color2: '#ff6600', // mid orange
+      color3: '#ffff00', // hot yellow core
+      speed: 3.0,
+      scale: 3.0,
+      coreBottom: 1.5,
+      coreTop: 1.0,
+      brightness: 1.0,
+      contrast: 1.0,
+      saturation: 1.0,
+      frames: 30,
+      fps: 30,
+      resolution: 256,
+      noiseType: 'voronoi' as 'simplex' | 'voronoi',
+      distortion: 0.8,
+      detail: 1.0, alphaThreshold: 0.0, flowX: 0, flowY: 1, flowZ: 0, rotX: 0, rotY: 0, rotZ: 0
+    };
+  });
+
+  useEffect(() => {
+    localStorage.setItem('fireGeneratorParams', JSON.stringify(params));
+  }, [params]);
+
+  const [isRendering, setIsRendering] = useState(false);
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    if (!mountRef.current) return;
+
+    const width = mountRef.current.clientWidth;
+    const height = mountRef.current.clientHeight;
+
+    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, preserveDrawingBuffer: true });
+    renderer.setSize(width, height);
+    rendererRef.current = renderer;
+    mountRef.current.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    sceneRef.current = scene;
+    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    cameraRef.current = camera;
+
+    const geometry = new THREE.PlaneGeometry(2, 2);
+    
+    const material = new THREE.ShaderMaterial({
+      vertexShader,
+      fragmentShader,
+      uniforms: {
+        loopProgress: { value: 0 },
+        shapeType: { value: params.shapeType === 'fireball' ? 1.0 : (params.shapeType === 'wisp' ? 2.0 : 0.0) },
+        color1: { value: new THREE.Color(params.color1) },
+        color2: { value: new THREE.Color(params.color2) },
+        color3: { value: new THREE.Color(params.color3) },
+        speed: { value: params.speed },
+        scale: { value: params.scale },
+        coreBottom: { value: params.coreBottom },
+        coreTop: { value: params.coreTop },
+        brightness: { value: params.brightness },
+        contrast: { value: params.contrast },
+        saturation: { value: params.saturation },
+        noiseType: { value: params.noiseType === 'voronoi' ? 1.0 : 0.0 },
+        distortion: { value: params.distortion },
+        detail: { value: params.detail },
+          
+          alphaThreshold: { value: params.alphaThreshold || 0.0 },
+          evolveOverLife: { value: params.evolveOverLife ? 1.0 : 0.0 },
+          flowDirection: { value: new THREE.Vector3(params.flowX || 0, params.flowY || 1.0, params.flowZ || 0) },
+          rotation: { value: new THREE.Vector3(params.rotX || 0, params.rotY || 0, params.rotZ || 0) },
+            rotationSpeed: { value: new THREE.Vector3(params.rotSpeedX || 0, params.rotSpeedY || 0, params.rotSpeedZ || 0) }
+        },
+      transparent: true,
+      blending: THREE.NormalBlending
+    });
+    materialRef.current = material;
+
+    const mesh = new THREE.Mesh(geometry, material);
+    scene.add(mesh);
+
+    let animationId: number;
+    let clock = new THREE.Clock();
+
+    const render = () => {
+      animationId = requestAnimationFrame(render);
+      if (materialRef.current) {
+        const loopDuration = params.frames / params.fps;
+        const pg = (clock.getElapsedTime() % loopDuration) / loopDuration;
+        materialRef.current.uniforms.loopProgress.value = pg;
+      }
+      renderer.render(scene, camera);
+    };
+    render();
+
+    const handleResize = () => {
+      if (!mountRef.current || !rendererRef.current) return;
+      rendererRef.current.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight);
+    };
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      cancelAnimationFrame(animationId);
+      if (mountRef.current && renderer.domElement.parentNode === mountRef.current) mountRef.current.removeChild(renderer.domElement);
+      renderer.dispose();
+      material.dispose();
+      geometry.dispose();
+    };
+  }, []);
+
+  // Update uniforms without remounting
+  useEffect(() => {
+    if (materialRef.current) {
+      materialRef.current.uniforms.shapeType.value = params.shapeType === 'fireball' ? 1.0 : (params.shapeType === 'wisp' ? 2.0 : 0.0);
+      materialRef.current.uniforms.color1.value.set(params.color1);
+      materialRef.current.uniforms.color2.value.set(params.color2);
+      materialRef.current.uniforms.color3.value.set(params.color3);
+      materialRef.current.uniforms.speed.value = params.speed;
+      materialRef.current.uniforms.scale.value = params.scale;
+      materialRef.current.uniforms.coreBottom.value = params.coreBottom;
+      materialRef.current.uniforms.coreTop.value = params.coreTop;
+      materialRef.current.uniforms.brightness.value = params.brightness;
+      materialRef.current.uniforms.contrast.value = params.contrast;
+      materialRef.current.uniforms.saturation.value = params.saturation;
+      materialRef.current.uniforms.noiseType.value = params.noiseType === 'voronoi' ? 1.0 : 0.0;
+      materialRef.current.uniforms.distortion.value = params.distortion;
+      materialRef.current.uniforms.detail.value = params.detail;
+      
+        materialRef.current.uniforms.alphaThreshold.value = params.alphaThreshold || 0.0;
+        if (materialRef.current.uniforms.flowDirection) {
+           materialRef.current.uniforms.flowDirection.value.set(params.flowX || 0, params.flowY || 1, params.flowZ || 0);
+        }
+        if (materialRef.current.uniforms.rotation) {
+           materialRef.current.uniforms.rotation.value.set(params.rotX || 0, params.rotY || 0, params.rotZ || 0);
+        }
+
+    }
+  }, [params]);
+
+  
+  // We use a ref to prevent racing or overlapping renders
+  const isAutoRenderingRef = useRef(false);
+
+  const generateSequenceDataUrls = async (currentParams: GeneratorParams): Promise<string[]> => {
+    return new Promise((resolve) => {
+      if (!rendererRef.current || !sceneRef.current || !cameraRef.current || !materialRef.current) {
+        resolve([]);
+        return;
+      }
+
+      const renderer = rendererRef.current;
+      
+      const targetSize = currentParams.resolution;
+      
+      const renderTarget = new THREE.WebGLRenderTarget(targetSize, targetSize, {
+        format: THREE.RGBAFormat,
+        type: THREE.UnsignedByteType,
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter
+      });
+      
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = targetSize;
+      tempCanvas.height = targetSize;
+      const ctx = tempCanvas.getContext('2d');
+      if (!ctx) { resolve([]); return; }
+
+      const dataUrls: string[] = [];
+      
+      for (let i = 0; i < currentParams.frames; i++) {
+        const progress = i / currentParams.frames;
+        materialRef.current.uniforms.loopProgress.value = progress;
+        
+        renderer.setRenderTarget(renderTarget);
+        renderer.render(sceneRef.current, cameraRef.current);
+        renderer.setRenderTarget(null);
+        
+        const pixels = new Uint8Array(targetSize * targetSize * 4);
+        renderer.readRenderTargetPixels(renderTarget, 0, 0, targetSize, targetSize, pixels);
+        
+        const imageData = new ImageData(targetSize, targetSize);
+        // Correcting image data flip
+        const data = imageData.data;
+        for (let y = 0; y < targetSize; y++) {
+            for (let x = 0; x < targetSize; x++) {
+                const srcIdx = ((targetSize - 1 - y) * targetSize + x) * 4;
+                const destIdx = (y * targetSize + x) * 4;
+                data[destIdx] = pixels[srcIdx];
+                data[destIdx+1] = pixels[srcIdx+1];
+                data[destIdx+2] = pixels[srcIdx+2];
+                data[destIdx+3] = pixels[srcIdx+3];
+            }
+        }
+
+          // Apply glow and blur
+          const offCanvas = document.createElement('canvas');
+          offCanvas.width = targetSize;
+          offCanvas.height = targetSize;
+          const offCtx = offCanvas.getContext('2d');
+          
+          if (offCtx) {
+            offCtx.putImageData(imageData, 0, 0);
+            
+            ctx.clearRect(0, 0, targetSize, targetSize);
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.filter = 'none';
+            ctx.drawImage(offCanvas, 0, 0);
+            
+            // First glow pass
+            ctx.globalCompositeOperation = 'screen';
+            ctx.filter = 'blur(4px)';
+            ctx.globalAlpha = 0.6;
+            ctx.drawImage(offCanvas, 0, 0);
+            
+            // Second glow pass
+            ctx.filter = 'blur(12px)';
+            ctx.globalAlpha = 0.3;
+            ctx.drawImage(offCanvas, 0, 0);
+            
+            // Reset state
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.filter = 'none';
+            ctx.globalAlpha = 1.0;
+          } else {
+            ctx.putImageData(imageData, 0, 0);
+          }
+          
+          dataUrls.push(tempCanvas.toDataURL('image/png'));
+        }
+          
+        renderTarget.dispose();
+      
+      resolve(dataUrls);
+    });
+  };
+
+  // Auto-Update logic debounce
+  useEffect(() => {
+    if (!embeddedUI || !onExportToParticleSystem) return;
+
+    const timerId = setTimeout(async () => {
+      if (isAutoRenderingRef.current) return;
+      isAutoRenderingRef.current = true;
+      try {
+        const dataUrls = await generateSequenceDataUrls(params);
+        if (dataUrls.length > 0) {
+            onExportToParticleSystem(dataUrls, params.fps);
+        }
+      } catch(err) {
+        console.error(err);
+      } finally {
+         isAutoRenderingRef.current = false;
+      }
+    }, 400); // 400ms debounce
+
+    return () => clearTimeout(timerId);
+  }, [params, embeddedUI, onExportToParticleSystem]);
+
+  const handleExport = async () => {
+    if (!rendererRef.current || !materialRef.current || !sceneRef.current || !cameraRef.current) return;
+    setIsRendering(true);
+    setProgress(0);
+
+    const oldWidth = rendererRef.current.domElement.width;
+    const oldHeight = rendererRef.current.domElement.height;
+
+    rendererRef.current.setSize(params.resolution, params.resolution);
+    
+    const zip = new JSZip();
+    const folder = zip.folder(`fire_sequence`);
+
+    // Reset clock for export so it loops predictably
+    const duration = params.frames / params.fps;
+
+    for (let i = 0; i < params.frames; i++) {
+        const progress = i / params.frames;
+        materialRef.current.uniforms.loopProgress.value = progress;
+        rendererRef.current.render(sceneRef.current, cameraRef.current);
+        
+        await new Promise<void>((resolve) => {
+            rendererRef.current!.domElement.toBlob((blob) => {
+                if (blob && folder) {
+                    const paddedIndex = i.toString().padStart(3, '0');
+                    folder.file(`fire_${paddedIndex}.png`, blob);
+                }
+                setProgress((i + 1) / params.frames);
+                resolve();
+            }, 'image/png');
+        });
+    }
+
+    // Restore size
+    rendererRef.current.setSize(mountRef.current?.clientWidth || oldWidth, mountRef.current?.clientHeight || oldHeight);
+
+    const content = await zip.generateAsync({ type: 'blob' });
+    onExport(content, `fire_sequence.zip`);
+    
+    setIsRendering(false);
+  };
+
+  const handleAttachToEmitter = async () => {
+    if (!rendererRef.current || !materialRef.current || !sceneRef.current || !cameraRef.current || !onAttachToEmitter) return;
+    setIsRendering(true);
+    setProgress(0);
+
+    const oldWidth = rendererRef.current.domElement.width;
+    const oldHeight = rendererRef.current.domElement.height;
+
+    rendererRef.current.setSize(params.resolution, params.resolution);
+    
+    const duration = params.frames / params.fps;
+    const dataUrls: string[] = [];
+
+    for (let i = 0; i < params.frames; i++) {
+        const progress = i / params.frames;
+        materialRef.current.uniforms.loopProgress.value = progress;
+        rendererRef.current.render(sceneRef.current, cameraRef.current);
+        
+        dataUrls.push(rendererRef.current.domElement.toDataURL('image/png'));
+        setProgress((i + 1) / params.frames);
+        
+        // Small delay to allow UI update
+        await new Promise(resolve => setTimeout(resolve, 10));
+    }
+
+    // Restore size
+    rendererRef.current.setSize(mountRef.current?.clientWidth || oldWidth, mountRef.current?.clientHeight || oldHeight);
+
+    onAttachToEmitter(dataUrls);
+    
+    setIsRendering(false);
+  };
+
+  return (
+    <div style={embeddedUI ? { display: 'flex', flexDirection: 'column', width: '100%', backgroundColor: 'transparent', color: 'inherit' } : { display: 'flex', width: '100%', height: '100vh', backgroundColor: '#1e1e1e', color: '#fff' }}>
+      <div style={embeddedUI ? { width: '100%', display: 'flex', flexDirection: 'column', gap: '10px', padding: '0', borderRight: 'none', overflowY: 'visible' } : { width: '300px', display: 'flex', flexDirection: 'column', gap: '15px', padding: '20px', borderRight: '1px solid #333', overflowY: 'auto' }}>
+        {!embeddedUI && <h3 style={{ margin: 0 }}>Fire Shader Generator</h3>}
+          {/* Presets Section */}
+          <div style={{ background: '#222', padding: '10px', borderRadius: '4px', marginBottom: '10px' }}>
+            <div style={{ fontSize: '13px', fontWeight: 'bold', marginBottom: '8px' }}>Presets</div>
+            
+            <div style={{ display: 'flex', gap: '5px', marginBottom: '8px' }}>
+              <select 
+                value={selectedPresetIndex}
+                onChange={e => {
+                  const val = e.target.value;
+                  if (val !== '') {
+                    handleLoadPreset(Number(val));
+                  } else {
+                    setSelectedPresetIndex('');
+                  }
+                }}
+                style={{ flex: 1, background:'#2a2a2a', border:'1px solid #444', color:'#fff', padding:'5px' }}
+              >
+                <option value="">-- Load Preset --</option>
+                {savedPresets.map((p, i) => (
+                  <option key={i} value={i}>{p.name}</option>
+                ))}
+              </select>
+              {typeof selectedPresetIndex === 'number' && true && (
+                <button 
+                  onClick={() => handleDeletePreset(selectedPresetIndex)}
+                  style={{ background:'#dc3545', color:'white', border:'none', borderRadius:'3px', padding:'0 8px', cursor:'pointer' }}
+                  title="Delete Preset"
+                >
+                  X
+                </button>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', gap: '5px' }}>
+              <input 
+                type="text" 
+                placeholder="New preset name..." 
+                value={presetName}
+                onChange={e => setPresetName(e.target.value)}
+                style={{ flex: 1, background:'#2a2a2a', border:'1px solid #444', color:'#fff', padding:'5px' }}
+              />
+              <button 
+                onClick={handleSavePreset}
+                disabled={!presetName.trim()}
+                style={{ background: presetName.trim() ? '#28a745' : '#555', color:'white', border:'none', borderRadius:'3px', padding:'5px 10px', cursor: presetName.trim() ? 'pointer' : 'default' }}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+
+
+        <div>
+          <label style={{display: 'block', fontSize: '12px', marginBottom:'5px'}}>Noise Algorithm</label>
+          <select
+            value={params.noiseType}
+            onChange={e => setParams({...params, noiseType: e.target.value as 'simplex' | 'voronoi'})}
+            style={{width:'100%', background:'#2a2a2a', border:'1px solid #444', color:'#fff', padding:'5px'}}
+          >
+            <option value="simplex">Simplex (Soft & Puffy)</option>
+            <option value="voronoi">Voronoi (Crisp & Liquid)</option>
+          </select>
+        </div>
+
+        <div>
+          <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
+            <span>Domain Distortion (Turbulence)</span>
+            <span>{params.distortion.toFixed(2)}</span>
+          </label>
+          <input type="range" min="0.0" max="3.0" step="0.05" value={params.distortion} onChange={e => setParams({...params, distortion: parseFloat(e.target.value)})} style={{width:'100%'}}/>
+        </div>
+
+                <div>
+          <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
+            <span>Flow Dir X</span>
+            <span>{(params.flowX || 0).toFixed(2)}</span>
+          </label>
+          <input type="range" min="-5.0" max="5.0" step="0.1" value={params.flowX || 0} onChange={e => setParams({...params, flowX: parseFloat(e.target.value)})} style={{width:'100%'}}/>
+        </div>
+
+        <div>
+          <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
+            <span>Flow Dir Y</span>
+            <span>{(params.flowY || 0).toFixed(2)}</span>
+          </label>
+          <input type="range" min="-5.0" max="5.0" step="0.1" value={params.flowY || 0} onChange={e => setParams({...params, flowY: parseFloat(e.target.value)})} style={{width:'100%'}}/>
+        </div>
+
+        <div>
+          <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
+            <span>Flow Dir Z</span>
+            <span>{(params.flowZ || 0).toFixed(2)}</span>
+          </label>
+          <input type="range" min="-5.0" max="5.0" step="0.1" value={params.flowZ || 0} onChange={e => setParams({...params, flowZ: parseFloat(e.target.value)})} style={{width:'100%'}}/>
+        </div>
+
+        <div>
+          <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
+            <span>Rotation X</span>
+            <span>{(params.rotX || 0).toFixed(2)}</span>
+          </label>
+          <input type="range" min="0" max="6.28" step="0.1" value={params.rotX || 0} onChange={e => setParams({...params, rotX: parseFloat(e.target.value)})} style={{width:'100%'}}/>
+        </div>
+
+        <div>
+          <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
+            <span>Rotation Y</span>
+            <span>{(params.rotY || 0).toFixed(2)}</span>
+          </label>
+          <input type="range" min="0" max="6.28" step="0.1" value={params.rotY || 0} onChange={e => setParams({...params, rotY: parseFloat(e.target.value)})} style={{width:'100%'}}/>
+        </div>
+
+        <div>
+          <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
+            <span>Rotation Z</span>
+            <span>{(params.rotZ || 0).toFixed(2)}</span>
+          </label>
+          <input type="range" min="0" max="6.28" step="0.1" value={params.rotZ || 0} onChange={e => setParams({...params, rotZ: parseFloat(e.target.value)})} style={{width:'100%'}}/>
+        </div>
+          <hr style={{ borderColor: '#333', margin: '5px 0' }} />
+          <div style={{ fontSize: '13px', fontWeight: 'bold' }}>Rotation Speed</div>
+          <div>
+            <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
+              <span>Rot Speed X</span>
+              <span>{(params.rotSpeedX || 0).toFixed(2)}</span>
+            </label>
+            <input type="range" min="-5.0" max="5.0" step="0.1" value={params.rotSpeedX || 0} onChange={e => setParams({...params, rotSpeedX: parseFloat(e.target.value)})} style={{width:'100%'}}/>
+          </div>
+          <div>
+            <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
+              <span>Rot Speed Y</span>
+              <span>{(params.rotSpeedY || 0).toFixed(2)}</span>
+            </label>
+            <input type="range" min="-5.0" max="5.0" step="0.1" value={params.rotSpeedY || 0} onChange={e => setParams({...params, rotSpeedY: parseFloat(e.target.value)})} style={{width:'100%'}}/>
+          </div>
+          <div>
+            <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
+              <span>Rot Speed Z</span>
+              <span>{(params.rotSpeedZ || 0).toFixed(2)}</span>
+            </label>
+            <input type="range" min="-5.0" max="5.0" step="0.1" value={params.rotSpeedZ || 0} onChange={e => setParams({...params, rotSpeedZ: parseFloat(e.target.value)})} style={{width:'100%'}}/>
+          </div>
+  <div>
+            <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
+              <span>Fractal Detail</span>
+            <span>{params.detail.toFixed(2)}</span>
+          </label>
+          <input type="range" min="0.0" max="2.0" step="0.05" value={params.detail} onChange={e => setParams({...params, detail: parseFloat(e.target.value)})} style={{width:'100%'}}/>
+        </div>
+
+        <div>
+          <label style={{display: 'block', fontSize: '12px', marginBottom:'5px'}}>Fire Shape</label>
+          <select
+            value={params.shapeType}
+            onChange={e => setParams({...params, shapeType: e.target.value as 'ground' | 'fireball' | 'wisp'})}
+            style={{width:'100%', background:'#2a2a2a', border:'1px solid #444', color:'#fff', padding:'5px'}}
+          >
+            <option value="ground">Ground Fire</option>
+            <option value="fireball">Fireball</option>
+            <option value="wisp">Wisp / Ribbon</option>
+          </select>
+        </div>
+
+        <div>
+          <label style={{display: 'block', fontSize: '12px', marginBottom:'5px'}}>Color 1 (Edge)</label>
+          <input type="color" value={params.color1} onChange={e => setParams({...params, color1: e.target.value})} style={{width:'100%'}}/>
+        </div>
+        <div>
+          <label style={{display: 'block', fontSize: '12px', marginBottom:'5px'}}>Color 2 (Mid)</label>
+          <input type="color" value={params.color2} onChange={e => setParams({...params, color2: e.target.value})} style={{width:'100%'}}/>
+        </div>
+        <div>
+          <label style={{display: 'block', fontSize: '12px', marginBottom:'5px'}}>Color 3 (Core)</label>
+          <input type="color" value={params.color3} onChange={e => setParams({...params, color3: e.target.value})} style={{width:'100%'}}/>
+        </div>
+
+        <div>
+          <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
+            <span>Speed</span>
+            <span>{params.speed.toFixed(1)}</span>
+          </label>
+          <input type="range" min="0.1" max="10" step="0.1" value={params.speed} onChange={e => setParams({...params, speed: parseFloat(e.target.value)})} style={{width:'100%'}}/>
+        </div>
+
+        <div>
+          <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
+            <span>Noise Scale</span>
+            <span>{params.scale.toFixed(1)}</span>
+          </label>
+          <input type="range" min="0.5" max="10" step="0.1" value={params.scale} onChange={e => setParams({...params, scale: parseFloat(e.target.value)})} style={{width:'100%'}}/>
+        </div>
+
+        <div>
+          <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
+            <span>Core Contrast Bottom</span>
+            <span>{params.coreBottom.toFixed(2)}</span>
+          </label>
+          <input type="range" min="0.1" max="5" step="0.1" value={params.coreBottom} onChange={e => setParams({...params, coreBottom: parseFloat(e.target.value)})} style={{width:'100%'}}/>
+        </div>
+        <div>
+          <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
+            <span>Core Contrast Top</span>
+            <span>{params.coreTop.toFixed(2)}</span>
+          </label>
+          <input type="range" min="0.1" max="5" step="0.1" value={params.coreTop} onChange={e => setParams({...params, coreTop: parseFloat(e.target.value)})} style={{width:'100%'}}/>
+        </div>
+
+        
+        <div>
+          <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
+            <span>Alpha Control</span>
+            <span>{(params.alphaThreshold || 0).toFixed(2)}</span>
+          </label>
+          <input type="range" min="0.0" max="1.5" step="0.01" value={params.alphaThreshold || 0.0} onChange={e => setParams({...params, alphaThreshold: parseFloat(e.target.value)})} style={{width:'100%'}}/>
+        </div>
+        <hr style={{ borderColor: '#333', margin: '5px 0' }} />
+        <div style={{ fontSize: '13px', fontWeight: 'bold' }}>Color Correction</div>
+
+        <div>
+          <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
+            <span>Brightness</span>
+            <span>{params.brightness.toFixed(2)}</span>
+          </label>
+          <input type="range" min="0.0" max="3.0" step="0.05" value={params.brightness} onChange={e => setParams({...params, brightness: parseFloat(e.target.value)})} style={{width:'100%'}}/>
+        </div>
+
+        <div>
+          <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
+            <span>Contrast</span>
+            <span>{params.contrast.toFixed(2)}</span>
+          </label>
+          <input type="range" min="0.0" max="3.0" step="0.05" value={params.contrast} onChange={e => setParams({...params, contrast: parseFloat(e.target.value)})} style={{width:'100%'}}/>
+        </div>
+
+        <div>
+          <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
+            <span>Saturation</span>
+            <span>{params.saturation.toFixed(2)}</span>
+          </label>
+          <input type="range" min="0.0" max="3.0" step="0.05" value={params.saturation} onChange={e => setParams({...params, saturation: parseFloat(e.target.value)})} style={{width:'100%'}}/>
+        </div>
+
+        <hr style={{ borderColor: '#333', margin: '10px 0' }} />
+
+        <div>
+          <label style={{display: 'block', fontSize: '12px', marginBottom:'5px'}}>Sequence Frames</label>
+          <input type="number" value={params.frames} onChange={e => setParams({...params, frames: parseInt(e.target.value)})} style={{width:'100%', background:'#2a2a2a', border:'1px solid #444', color:'#fff', padding:'5px'}}/>
+        </div>
+        
+        <div>
+          <label style={{display: 'block', fontSize: '12px', marginBottom:'5px'}}>Resolution</label>
+          <select value={params.resolution} onChange={e => setParams({...params, resolution: parseInt(e.target.value)})} style={{width:'100%', background:'#2a2a2a', border:'1px solid #444', color:'#fff', padding:'5px'}}>
+            <option value={64}>64 x 64</option>
+            <option value={128}>128 x 128</option>
+            <option value={256}>256 x 256</option>
+            <option value={512}>512 x 512</option>
+          </select>
+        </div>
+
+        <button 
+          onClick={handleExport}
+          disabled={isRendering}
+          style={{
+            marginTop: '20px',
+            padding: '10px',
+            backgroundColor: isRendering ? '#444' : '#0066cc',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: isRendering ? 'default' : 'pointer'
+          }}
+        >
+          {isRendering ? `Rendering ${Math.round(progress * 100)}%` : 'Export Fire ZIP'}
+        </button>
+
+        {onAttachToEmitter && (
+          <button 
+            onClick={handleAttachToEmitter}
+            disabled={isRendering}
+            style={{
+              marginTop: '10px',
+              padding: '10px',
+              backgroundColor: isRendering ? '#444' : '#28a745',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: isRendering ? 'default' : 'pointer'
+            }}
+          >
+            {isRendering ? `Attaching ${Math.round(progress * 100)}%` : 'Attach to Selected Emitter'}
+          </button>
+        )}
+
+      </div>
+      
+      <div style={{ flex: 1, position: 'relative' }}>
+        <div style={{ position: 'absolute', top: '10px', left: '10px', zIndex: 10, fontSize: '12px', background: 'rgba(0,0,0,0.5)', padding: '5px' }}>
+          Live Preview
+        </div>
+        <div ref={mountRef} style={{ width: '100%', height: '100%', background: '#000' }} />
+      </div>
+    </div>
+  );
+};

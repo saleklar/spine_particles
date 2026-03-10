@@ -1,0 +1,1 @@
+const fs = require('fs'); let C = fs.readFileSync('src/FireGenerator.tsx', 'utf8'); C = C.replace('clamp(outColor.a, 0.0, 1.0)));\\n    float a', 'clamp(outColor.a, 0.0, 1.0)));\n    float a'); fs.writeFileSync('src/FireGenerator.tsx', C);

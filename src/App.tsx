@@ -1,6 +1,9 @@
+import { generateFireSequenceHeadless, defaultTorchParams, defaultCampfireParams } from './FireHeadless';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Scene3D, Scene3DRef } from './Scene3D';
 import { Animator3D } from './Animator3D';
+import { FireGenerator } from './FireGenerator';
+import { CurveEditor } from './CurveEditor';
 
 type SceneSize = {
   x: number;
@@ -28,7 +31,7 @@ export type SnapSettings = {
   snapTarget: 'vertices' | 'lines' | 'both';
 };
 
-export type PhysicsForceType = 'gravity' | 'wind' | 'tornado' | 'drag' | 'damping' | 'attractor' | 'repulsor' | 'collider' | 'flow-curve' | 'vortex' | 'turbulence';
+export type PhysicsForceType = 'gravity' | 'wind' | 'tornado' | 'drag' | 'damping' | 'attractor' | 'repulsor' | 'collider' | 'flow-curve' | 'vortex' | 'turbulence' | 'thermal-updraft';
 
 export type PhysicsForce = {
   id: string;
@@ -61,6 +64,11 @@ export type EmitterShapeProperties = {
   emitterType: EmitterShapeType;
   emissionMode: 'surface' | 'volume' | 'edge';
   layerImageDataUrl?: string;
+  useFractalNoiseMap?: boolean;
+  fractalNoiseScale?: number;
+  fractalNoiseDetail?: number;
+  fractalNoiseSpeed?: number;
+  fractalNoiseThreshold?: number;
 };
 
 export type EmitterShapeObject = SceneObject & {
@@ -80,17 +88,20 @@ export type EmitterObject = SceneObject & {
     particleColor: string;
     particleSize: number;
     particleOpacity: number;
-    particleType: 'dots' | 'stars' | 'circles' | 'glow-circles' | 'sprites' | '3d-model';
+    particleType: "dots" | "stars" | "circles" | "glow-circles" | "sprites" | "3d-model" | "volumetric-fire";
     particleGlow: boolean;
     particleRotation: number;
     particleRotationVariation: number;
     particleRotationSpeed: number;
     particleRotationSpeedVariation: number;
+  particleStretch?: boolean;
+  particleStretchAmount?: number;
     particleSpriteImageDataUrl?: string;
     particleSpriteImageName?: string;
     particleSpriteSequenceDataUrls?: string[];
     particleSpriteSequenceFirstName?: string;
     particleSpriteSequenceFps?: number;
+      particleSpriteSequenceMode?: 'loop' | 'match-life';
     particleSpeedVariation: number;
     particleLifetimeVariation: number;
     particleSizeVariation: number;
@@ -99,6 +110,10 @@ export type EmitterObject = SceneObject & {
     particleColorOverLife: boolean;
     particleColorOverLifeTarget: string;
     particleSizeOverLife: string;
+    particleSizeOverLifeCurve?: string;
+    particleOpacityOverLifeCurve?: string;
+    particleRotationOverLife: boolean;
+    particleRotationOverLifeCurve?: string;
       particleSeed?: number;
     showPathCurves?: boolean;
     pathCurveKeyCount?: number;
@@ -197,14 +212,16 @@ const interpolateSceneObject = (from: SceneObject, to: SceneObject, t: number): 
 };
 
 export function App() {
-  const [appMode, setAppMode] = useState<'particle-system' | '3d-animator' | 'split'>('particle-system');
+  const [showFireModal, setShowFireModal] = useState(false);
+  const [appMode, setAppMode] = useState<'particle-system' | '3d-animator' | 'split' | 'fire-generator'>('particle-system');
   const [showScenePropertiesPanel, setShowScenePropertiesPanel] = useState(true);
   const [leftPanelTab, setLeftPanelTab] = useState<'scene' | 'hierarchy'>('hierarchy');
   const [renamingObjectId, setRenamingObjectId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [showFileMenu, setShowFileMenu] = useState(false);
   const [showCreateMenu, setShowCreateMenu] = useState(false);
-  const [showCreateSubmenu, setShowCreateSubmenu] = useState<'3D' | '2D' | null>(null);
+  const [showPresetsMenu, setShowPresetsMenu] = useState(false);
+  const [showCreateSubmenu, setShowCreateSubmenu] = useState<'3D' | '2D' | 'Presets' | null>(null);
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
   const [draftSize, setDraftSize] = useState<SceneSize>(DEFAULT_SCENE_SIZE);
   const scene3DRef = useRef<Scene3DRef>(null);
@@ -682,13 +699,16 @@ export function App() {
       particleRotationVariation: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleRotationVariation ?? 0),
       particleRotationSpeed: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleRotationSpeed ?? 0),
       particleRotationSpeedVariation: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleRotationSpeedVariation ?? 0),
+      particleStretch: Boolean((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleStretch ?? false),
+      particleStretchAmount: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleStretchAmount ?? 0.05),
       particleSpriteImageDataUrl: String((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleSpriteImageDataUrl ?? ''),
       particleSpriteImageName: String((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleSpriteImageName ?? ''),
       particleSpriteSequenceDataUrls: Array.isArray((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleSpriteSequenceDataUrls)
         ? ((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleSpriteSequenceDataUrls as string[])
         : [],
       particleSpriteSequenceFirstName: String((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleSpriteSequenceFirstName ?? ''),
-      particleSpriteSequenceFps: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleSpriteSequenceFps ?? 12),
+      particleSpriteSequenceMode: String((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleSpriteSequenceMode ?? 'loop'),
+        particleSpriteSequenceFps: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleSpriteSequenceFps ?? 12),
       particleSpeedVariation: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleSpeedVariation ?? 0.2),
       particleLifetimeVariation: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleLifetimeVariation ?? 0),
       particleSizeVariation: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleSizeVariation ?? 0),
@@ -697,6 +717,8 @@ export function App() {
       particleColorOverLife: Boolean((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleColorOverLife ?? false),
       particleColorOverLifeTarget: String((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleColorOverLifeTarget ?? '#000000'),
       particleSizeOverLife: String((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleSizeOverLife ?? 'none'),
+        particleSizeOverLifeCurve: String((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleSizeOverLifeCurve ?? ''),
+        particleOpacityOverLifeCurve: String((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleOpacityOverLifeCurve ?? ''),
         particleSeed: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleSeed ?? 0),
       showPathCurves: Boolean((selectedObject.properties as EmitterObject['properties'] | undefined)?.showPathCurves ?? false),
       pathCurveKeyCount: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.pathCurveKeyCount ?? 5),
@@ -714,6 +736,11 @@ export function App() {
       emitterType: String((selectedObject.properties as EmitterShapeProperties | undefined)?.emitterType ?? inferEmitterShapeTypeFromObjectType(selectedObject.type)) as EmitterShapeProperties['emitterType'],
       emissionMode: String((selectedObject.properties as EmitterShapeProperties | undefined)?.emissionMode ?? 'volume') as EmitterShapeProperties['emissionMode'],
       layerImageDataUrl: String((selectedObject.properties as EmitterShapeProperties | undefined)?.layerImageDataUrl ?? ''),
+      useFractalNoiseMap: Boolean((selectedObject.properties as EmitterShapeProperties | undefined)?.useFractalNoiseMap ?? false),
+      fractalNoiseScale: Number((selectedObject.properties as EmitterShapeProperties | undefined)?.fractalNoiseScale ?? 1),
+      fractalNoiseDetail: Number((selectedObject.properties as EmitterShapeProperties | undefined)?.fractalNoiseDetail ?? 3),
+      fractalNoiseSpeed: Number((selectedObject.properties as EmitterShapeProperties | undefined)?.fractalNoiseSpeed ?? 1),
+      fractalNoiseThreshold: Number((selectedObject.properties as EmitterShapeProperties | undefined)?.fractalNoiseThreshold ?? 0.5),
     }
     : null;
 
@@ -944,6 +971,29 @@ export function App() {
     handleSave();
   }, [handleSave]);
 
+  const handleNewScene = useCallback(() => {
+    if (window.confirm('Are you sure you want to start a new scene? All unsaved changes will be lost.')) {
+      setSceneObjects([]);
+      setPhysicsForces([]);
+      setKeyframes({});
+      setUndoStack([]);
+      setRedoStack([]);
+      setCurrentFrame(0);
+      setTimelineIn(0);
+      setTimelineOut(240);
+      setSelectedObjectId(null);
+      setSelectedForceId(null);
+      setIsPlaying(false);
+      setIsCaching(false);
+      setCacheResetToken(Date.now());
+      setSceneSize(DEFAULT_SCENE_SIZE);
+      setDraftSize(DEFAULT_SCENE_SIZE);
+      setSceneSettings(DEFAULT_SCENE_SETTINGS);
+      setViewMode('perspective');
+      setShowFileMenu(false);
+    }
+  }, []);
+
   const handleOpen = useCallback(() => {
     const input = document.createElement('input');
     input.type = 'file';
@@ -998,7 +1048,7 @@ export function App() {
       setSelectedObjectId(targetId);
     } else {
       const newObject: any = { id: `Emitter_${Date.now()}`, name: 'Animated Sprite Emitter', type: 'Emitter', position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 }, parentId: null };
-      newObject.properties = { emissionRate: 5, emitterType: 'point', emissionMode: 'volume', layerImageDataUrl: '', particleLifetime: 3, particleSpeed: 50, particleSpeedVariation: 0.2, particleSize: 5, particleSizeVariation: 0.2, particleColor: '#ffffff', particleColorVariation: 0.1, particleOpacity: 1, particleType: 'sprites', particleGlow: false, particleRotation: 0, particleRotationVariation: 0, particleRotationSpeed: 0, particleRotationSpeedVariation: 0, particleTextureUrl: '', particleTextureName: '', particleSpriteImageDataUrl: '', particleSpriteImageName: '', particleOpacityOverLife: false, particleColorOverLife: false, particleColorOverLifeTarget: '#000000', particleSizeOverLife: 'none', particleSpriteSequenceDataUrls: dataUrls, particleSpriteSequenceFirstName: 'Rendered Animation', particleSpriteSequenceFps: 24};
+      newObject.properties = { emissionRate: 5, emitterType: 'point', emissionMode: 'volume', layerImageDataUrl: '', particleLifetime: 3, particleSpeed: 50, particleSpeedVariation: 0.2, particleSize: 5, particleSizeVariation: 0.2, particleColor: '#ffffff', particleColorVariation: 0.1, particleOpacity: 1, particleType: 'sprites', particleGlow: false, particleRotation: 0, particleRotationVariation: 0, particleRotationSpeed: 0, particleRotationSpeedVariation: 0, particleStretch: false, particleStretchAmount: 0.05, particleTextureUrl: '', particleTextureName: '', particleSpriteImageDataUrl: '', particleSpriteImageName: '', particleOpacityOverLifeCurve: '', particleRotationOverLife: false, particleRotationOverLifeCurve: '', particleSizeOverLifeCurve: '', particleOpacityOverLife: false, particleColorOverLife: false, particleColorOverLifeTarget: '#000000', particleSizeOverLife: 'none', particleSpriteSequenceDataUrls: dataUrls, particleSpriteSequenceFirstName: 'Rendered Animation', particleSpriteSequenceFps: 24, particleSpriteSequenceMode: 'loop'};
       setSceneObjects(prev => [...prev, newObject]);
       setSelectedObjectId(newObject.id);
     }
@@ -1036,7 +1086,7 @@ export function App() {
         particleRotation: 0,
         particleRotationVariation: 0,
         particleRotationSpeed: 0,
-        particleRotationSpeedVariation: 0,
+        particleRotationSpeedVariation: 0, particleStretch: false, particleStretchAmount: 0.05,
         particleSpriteImageDataUrl: '',
         particleSpriteImageName: '',
         particleSpriteSequenceDataUrls: [],
@@ -1058,11 +1108,113 @@ export function App() {
       setSceneObjects((prev) => [...prev, newObject, emitterShapeNode]);
       setSelectedObjectId(newObject.id);
       setShowCreateMenu(false);
+          setShowPresetsMenu(false);
       return;
     }
 
     setSceneObjects((prev) => [...prev, newObject]);
     setShowCreateMenu(false);
+  }, [createEmitterShapeNode]);
+
+  const handleCreateFirePreset = useCallback(async (presetType: 'campfire' | 'torch') => {
+    let dataUrls: string[] = [];
+    if (presetType === 'torch') {
+      try {
+        dataUrls = await generateFireSequenceHeadless(defaultTorchParams);
+      } catch(e) { console.error(e) }
+    } else if (presetType === 'campfire') {
+      try {
+        dataUrls = await generateFireSequenceHeadless(defaultCampfireParams);
+      } catch(e) { console.error(e) }
+    }
+    const emitterId = `emitter_${Date.now()}`;
+    const newEmitter: SceneObject = {
+      id: emitterId,
+      name: presetType === 'campfire' ? 'Campfire Emitter' : 'Torch Emitter',
+      type: 'Emitter',
+      position: { x: 0, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+      parentId: null,
+      properties: {
+        emissionRate: presetType === 'campfire' ? 80 : 150,
+        emitterType: 'circle',
+        emissionMode: 'volume',
+        layerImageDataUrl: '',
+        particleLifetime: presetType === 'campfire' ? 2 : 1.5,
+        particleSpeed: presetType === 'campfire' ? 20 : 50,
+        particleColor: '#ffffff',
+        particleSize: dataUrls.length > 0 ? (presetType === 'campfire' ? 20.0 : 15.0) : 10.0,
+        particleOpacity: 0.8,
+        particleType: dataUrls.length > 0 ? 'sprites' : 'dots',
+        particleGlow: true,
+        particleRotation: 0,
+        particleRotationVariation: 180,
+        particleRotationSpeed: 2,
+        particleRotationSpeedVariation: 1,
+        particleStretch: false,
+        particleStretchAmount: 0.05,
+        particleSpriteImageDataUrl: '',
+        particleSpriteImageName: '',
+        particleSpriteSequenceDataUrls: dataUrls,
+        particleSpriteSequenceFps: dataUrls.length > 0 ? (presetType === 'campfire' ? defaultCampfireParams.fps : defaultTorchParams.fps) : 30,
+        particleSpriteSequenceFirstName: '',
+        particleSpeedVariation: 0.3,
+        particleLifetimeVariation: 0.2,
+        particleSizeVariation: 0.4,
+        particleColorVariation: 0,
+        particleOpacityOverLife: true,
+        particleColorOverLife: true,
+        particleColorOverLifeTarget: '#ffbb00', // fade to orange instead of pure black/white
+        particleSizeOverLife: 'shrink',
+        particleSeed: Math.floor(Math.random() * 1000000),
+        showPathCurves: false,
+        pathCurveKeyCount: 5,
+      }
+    };
+
+    // Adjust scale for shape based on preset
+    const shapeScaleX = presetType === 'campfire' ? 1.5 : 0.5;
+    const shapeScaleZ = presetType === 'campfire' ? 1.5 : 0.5;
+
+    const baseShapeNode = createEmitterShapeNode(emitterId, newEmitter);
+    const emitterShapeNode = {
+      ...baseShapeNode,
+      scale: { x: shapeScaleX, y: 1, z: shapeScaleZ }
+    };
+
+    // Physics forces
+    const windForceId = `force-${Date.now()}-wind`;
+    const windForce: PhysicsForce = {
+      id: windForceId,
+      name: 'Fire Wind',
+      type: 'wind',
+      position: { x: 0, y: 0, z: 0 },
+      strength: presetType === 'campfire' ? 15 : 30, // move particles up
+      radius: 100,
+      direction: { x: 0, y: 1, z: 0 },
+      affectedEmitterIds: [emitterId],
+      enabled: true,
+    };
+
+    const turbulenceForceId = `force-${Date.now()}-turb`;
+    const turbulenceForce: PhysicsForce = {
+      id: turbulenceForceId,
+      name: 'Fire Turbulence',
+      type: 'turbulence',
+      position: { x: 0, y: 50, z: 0 },
+      strength: presetType === 'campfire' ? 20 : 10,
+      radius: 200,
+      direction: { x: 0, y: 1, z: 0 },
+      affectedEmitterIds: [emitterId],
+      enabled: true,
+    };
+
+    setSceneObjects((prev) => [...prev, newEmitter, emitterShapeNode]);
+    setPhysicsForces((prev) => [...prev, windForce, turbulenceForce]);
+    setSelectedObjectId(newEmitter.id);
+    setShowCreateMenu(false);
+    setShowCreateSubmenu(null);
   }, [createEmitterShapeNode]);
 
   // Timeline playback
@@ -1442,10 +1594,17 @@ export function App() {
         return;
       }
 
-      // Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y: Redo
+      // Ctrl/Cmd+Y: Redo
       if (isModKey && ((event.shiftKey && key === 'z') || key === 'y')) {
         event.preventDefault();
         handleRedo();
+        return;
+      }
+
+      // Ctrl/Cmd+N: New Scene
+      if (isModKey && !event.shiftKey && key === 'n') {
+        event.preventDefault();
+        handleNewScene();
         return;
       }
 
@@ -1708,6 +1867,42 @@ export function App() {
     );
   };
 
+  // Render Fire Generator mode
+  if (appMode === 'fire-generator') {
+    return (
+      <div className="workspace">
+        <div className="menu-bar">
+          <div className="menu-item">
+            <button
+              className="menu-button"
+              onClick={() => setAppMode('particle-system')}
+              type="button"
+              style={{ backgroundColor: '#0066cc', color: '#fff' }}
+            >
+              ← Particle System
+            </button>
+          </div>
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '14px' }}>
+            Fire Shader Generator
+          </div>
+        </div>
+        <div className="main-content">
+          <FireGenerator
+            onExport={(blob, name) => {
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = name;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+            onAttachToEmitter={handleExportToParticleSystem}
+          />
+        </div>
+      </div>
+    );
+  }
+
   // Render 3D Animator mode
   if (appMode === '3d-animator') {
     return (
@@ -1750,6 +1945,14 @@ export function App() {
           </button>
           {showFileMenu && (
             <div className="menu-dropdown">
+              <button
+                className="menu-option"
+                onClick={handleNewScene}
+                type="button"
+              >
+                <span>New Scene</span>
+                <span className="shortcut">Ctrl+N</span>
+              </button>
               <button
                 className="menu-option"
                 onClick={handleOpen}
@@ -1825,6 +2028,16 @@ export function App() {
             style={{ backgroundColor: '#eeb868', color: '#1a1a1a', fontWeight: 'bold' }}
           >
             3D Asset Creator
+          </button>
+        </div>
+        <div className="menu-item">
+          <button
+            className="menu-button"
+            onClick={() => setAppMode('fire-generator')}
+            type="button"
+            style={{ backgroundColor: '#ff6600', color: '#fff', fontWeight: 'bold' }}
+          >
+            Fire Generator
           </button>
         </div>
         <div className="menu-item">
@@ -2006,6 +2219,43 @@ export function App() {
               >
                 <span>Emitter</span>
               </button>
+              
+            </div>
+          )}
+        </div>
+
+        
+        <div className="menu-item">
+          <button
+            className="menu-button"
+            onClick={() => setShowPresetsMenu(!showPresetsMenu)}
+            type="button"
+            style={{ backgroundColor: '#2a9d8f', color: '#fff', fontWeight: 'bold' }}
+          >
+            Presets
+          </button>
+          {showPresetsMenu && (
+            <div className="menu-dropdown">
+              <button
+                className="menu-option"
+                onClick={() => {
+                  handleCreateFirePreset('campfire');
+                  setShowPresetsMenu(false);
+                }}
+                type="button"
+              >
+                <span>Campfire</span>
+              </button>
+              <button
+                className="menu-option"
+                onClick={() => {
+                  handleCreateFirePreset('torch');
+                  setShowPresetsMenu(false);
+                }}
+                type="button"
+              >
+                <span>Torch</span>
+              </button>
             </div>
           )}
         </div>
@@ -2130,26 +2380,20 @@ export function App() {
               >
                 <span>Add Turbulence</span>
               </button>
+              <button
+                className="menu-option"
+                onClick={() => {
+                  handleAddPhysicsForce('thermal-updraft');
+                  setShowPhysicsPanel(false);
+                }}
+                type="button"
+              >
+                <span>Add Thermal Updraft</span>
+              </button>
             </div>
           )}
         </div>
 
-        
-        <div className="menu-item">
-          <button
-            className="menu-button"
-            onClick={handleExportSpine}
-            style={{ 
-              backgroundColor: '#eeb868', 
-              color: '#1a1a1a', 
-              fontWeight: 'bold', 
-              whiteSpace: 'nowrap'
-            }}
-          >
-            Export Cached Animation
-          </button>
-        </div>
-        
         <div className="menu-item">
           <button
             className="menu-button"
@@ -2767,6 +3011,7 @@ export function App() {
                           <option value="flow-curve">Flow Along Curve</option>
                           <option value="vortex">Vortex</option>
                           <option value="turbulence">Turbulence</option>
+                          <option value="thermal-updraft">Thermal Updraft</option>
                         </select>
 
                         <label htmlFor="force-enabled">
@@ -3432,7 +3677,36 @@ export function App() {
                           <option value="glow-circles">Glow Circles</option>
                           <option value="sprites">Sprites</option>
                           <option value="3d-model">Live 3D Model</option>
+          <option value="volumetric-fire">Live Volumetric Fire</option>
                         </select>
+
+                        <label htmlFor="particle-stretch">
+                          <input
+                            id="particle-stretch"
+                            type="checkbox"
+                            checked={selectedEmitterProperties.particleStretch || false}
+                            onChange={(event) => handleUpdateEmitterProperty('particleStretch', event.target.checked)}
+                            style={{ marginRight: '8px' }}
+                          />
+                          Velocity Stretch
+                        </label>
+
+                        {selectedEmitterProperties.particleStretch && (
+                          <>
+                            <label htmlFor="particle-stretch-amount">
+                              Stretch Amount: {selectedEmitterProperties.particleStretchAmount ?? 0.05}
+                            </label>
+                            <input
+                              id="particle-stretch-amount"
+                              type="range"
+                              min="0.01"
+                              max="0.2"
+                              step="0.01"
+                              value={selectedEmitterProperties.particleStretchAmount ?? 0.05}
+                              onChange={(event) => handleUpdateEmitterProperty('particleStretchAmount', Number.parseFloat(event.target.value))}
+                            />
+                          </>
+                        )}
 
                         <label htmlFor="particle-glow">
                           <input
@@ -3524,6 +3798,36 @@ export function App() {
                             </div>
                           </div>
                         )}
+
+{selectedEmitterProperties.particleType === 'volumetric-fire' && (
+    <div style={{
+    width: '100%',
+    marginLeft: '-2px',
+    border: '1px solid #444',
+    boxSizing: 'border-box',
+    boxShadow: 'inset 0 0 10px rgba(0,0,0,0.5)',
+    borderRadius: '4px',
+    backgroundColor: '#1e1e1e',
+    backgroundSize: '20px 20px',
+    backgroundImage: 'linear-gradient(to right, #2a2a2a 1px, transparent 1px), linear-gradient(to bottom, #2a2a2a 1px, transparent 1px)',
+    marginTop: '10px'
+    }}>
+    <h3 style={{ margin: '0', padding: '5px 10px', fontSize: '12px', background: '#333', color: '#aaa', borderBottom: '1px solid #444', cursor: 'grab' }} >Live Volumetric Fire Settings</h3>
+    <div style={{ padding: '10px' }}>
+        <FireGenerator
+        embeddedUI={true}
+        onExportToParticleSystem={(dataUrls, fps) => {
+            const textureName = `fire_gen_${Date.now()}`;
+            handleUpdateEmitterProperty('texture', textureName);
+            handleUpdateEmitterProperty('particleSpriteSequenceDataUrls', dataUrls);
+            handleUpdateEmitterProperty('particleSpriteSequenceFps', fps || 30);
+        }}
+        onExport={() => {}}
+        />
+    </div>
+    </div>
+)}
+
 
                         <label htmlFor="particle-speed">
                           Speed: {selectedEmitterProperties.particleSpeed.toFixed(0)} units/sec
@@ -3695,16 +3999,45 @@ export function App() {
 
                         <label htmlFor="particle-opacity-over-life">
                           <input
-                            id="particle-opacity-over-life"
-                            type="checkbox"
-                            checked={selectedEmitterProperties.particleOpacityOverLife}
-                            onChange={(event) => handleUpdateEmitterProperty('particleOpacityOverLife', event.target.checked)}
-                            style={{ marginRight: '8px' }}
-                          />
-                          Fade to Transparent
+                              id="particle-opacity-over-life"
+                              type="checkbox"
+                              checked={selectedEmitterProperties.particleOpacityOverLife}
+                              onChange={(event) => {
+                                handleUpdateEmitterProperty('particleOpacityOverLife', event.target.checked);
+                                if (event.target.checked) handleUpdateEmitterProperty('particleOpacityOverLifeCurve', '');
+                              }}
+                              style={{ marginRight: '8px' }}
+                            />
+                            Fade to Transparent
+                          </label>
+                          <label htmlFor="particle-opacity-use-curve" style={{ marginTop: '0.5rem' }}>
+                            <input
+                              id="particle-opacity-use-curve"
+                              type="checkbox"
+                              checked={selectedEmitterProperties.particleOpacityOverLifeCurve !== undefined && selectedEmitterProperties.particleOpacityOverLifeCurve !== ''}
+                              onChange={(event) => {
+                                if (event.target.checked) {
+                                  handleUpdateEmitterProperty('particleOpacityOverLifeCurve', '[{"x":0,"y":1},{"x":1,"y":0}]');
+                                  handleUpdateEmitterProperty('particleOpacityOverLife', false);
+                                } else {
+                                  handleUpdateEmitterProperty('particleOpacityOverLifeCurve', '');
+                                }
+                              }}
+                              style={{ marginRight: '8px' }}
+                            />
+                            Use Opacity Curve
                         </label>
 
-                        <label htmlFor="particle-color-over-life">
+                        {(selectedEmitterProperties.particleOpacityOverLifeCurve !== undefined && selectedEmitterProperties.particleOpacityOverLifeCurve !== '') && (
+                            <div style={{ marginTop: '10px', marginBottom: '10px' }}>
+                              <label style={{ display: 'block', marginBottom: '5px', color: '#8a93a2', fontSize: '0.8rem' }}>Opacity Curve Target</label>
+                              <CurveEditor 
+                                value={selectedEmitterProperties.particleOpacityOverLifeCurve || '[{"x":0,"y":1},{"x":1,"y":0}]'}
+                                onChange={(val) => handleUpdateEmitterProperty('particleOpacityOverLifeCurve', val)}
+                              />
+                            </div>
+                          )}
+                          <label htmlFor="particle-color-over-life">
                           <input
                             id="particle-color-over-life"
                             type="checkbox"
@@ -3733,14 +4066,25 @@ export function App() {
                           Size Over Life
                         </label>
                         <select
-                          id="particle-size-over-life"
-                          value={selectedEmitterProperties.particleSizeOverLife}
-                          onChange={(event) => handleUpdateEmitterProperty('particleSizeOverLife', event.target.value)}
-                        >
-                          <option value="none">None</option>
-                          <option value="shrink">Shrink</option>
-                          <option value="grow">Grow</option>
+                            id="particle-size-over-life"
+                            value={selectedEmitterProperties.particleSizeOverLife}
+                            onChange={(event) => handleUpdateEmitterProperty('particleSizeOverLife', event.target.value)}
+                          >
+                            <option value="none">None</option>
+                            <option value="shrink">Shrink</option>
+                            <option value="grow">Grow</option>
+                            <option value="curve">Curve</option>
                           </select>
+                          
+                          {selectedEmitterProperties.particleSizeOverLife === 'curve' && (
+                            <div style={{ marginTop: '10px', marginBottom: '10px' }}>
+                              <label style={{ display: 'block', marginBottom: '5px', color: '#8a93a2', fontSize: '0.8rem' }}>Size Curve Multiplier</label>
+                              <CurveEditor 
+                                value={selectedEmitterProperties.particleSizeOverLifeCurve || '[{"x":0,"y":1},{"x":1,"y":0}]'}
+                                onChange={(val) => handleUpdateEmitterProperty('particleSizeOverLifeCurve', val)}
+                              />
+                            </div>
+                          )}
 
                           <label htmlFor="particle-seed">
                             Random Seed: {selectedEmitterProperties.particleSeed ?? 0}

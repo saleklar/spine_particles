@@ -1,0 +1,1 @@
+const fs = require('fs'); let C = fs.readFileSync('src/FireGenerator.tsx', 'utf8'); C = C.replace(/\{\s*\{\s*name:\s*'Plasma Wisp \(Details\)'/g, '{ name: \'Plasma Wisp (Details)\''); fs.writeFileSync('src/FireGenerator.tsx', C);

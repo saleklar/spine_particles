@@ -1,0 +1,1 @@
+const fs = require("fs"); let c = fs.readFileSync("src/Scene3D.tsx", "utf8"); c = c.split("volumetric-fire").join("vf").replace(/=== .vf./g, "as any === \"volumetric-fire\""); fs.writeFileSync("src/Scene3D.tsx", c);

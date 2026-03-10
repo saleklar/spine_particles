@@ -1,0 +1,1 @@
+const fs = require("fs"); let c = fs.readFileSync("src/FireGenerator.tsx", "utf8"); c = c.split("float mask = 0.0;").join(""); c = c.replace("float n = fbm(np);", "float n = fbm(np);\nfloat mask = 0.0;"); fs.writeFileSync("src/FireGenerator.tsx", c);

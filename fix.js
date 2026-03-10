@@ -1,30 +1,9 @@
 const fs = require('fs');
-let code = fs.readFileSync('src/Scene3D.tsx', 'utf8');
+let code = fs.readFileSync('src/FireGenerator.tsx', 'utf8');
 
-code = code.replace(
-  'const boneAnim = { translate: [] as any[], scale: [] as any[] };',
-  'const boneAnim = { translate: [] as any[], scale: [] as any[], rotate: [] as any[] };'
-);
+const badStr = '    rotZ: number;\nuniform float coreBottom;';
+const newStr = '    rotZ: number;\n  }\n\n  export interface SavedPreset {\n    name: string;\n    params: GeneratorParams;\n  }\n\n  export const vertexShader = \\n  varying vec2 vUv;\n  void main() {\n      vUv = uv;\n      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);\n  }\n  \;\n\n  export const fragmentShader = \\n  uniform float loopProgress;\n  uniform float speed;\n  uniform float scale;\n  uniform float coreBottom;';
 
-code = code.replace(
-  'boneAnim.scale.push({ time: 0, x: 0, y: 0, curve: "stepped" });',
-  'boneAnim.scale.push({ time: 0, x: 0, y: 0, curve: "stepped" });\n            boneAnim.rotate.push({ time: 0, angle: 0, curve: "stepped" });'
-);
-
-code = code.replace(
-  'boneAnim.scale.push({ time: Math.max(0, (life[0].frame - 1)) / 24, x: 0, y: 0, curve: "stepped" });',
-  'boneAnim.scale.push({ time: Math.max(0, (life[0].frame - 1)) / 24, x: 0, y: 0, curve: "stepped" });\n              boneAnim.rotate.push({ time: Math.max(0, (life[0].frame - 1)) / 24, angle: 0, curve: "stepped" });'
-);
-
-code = code.replace(
-  \              boneAnim.scale.push({\n                 time,\n                 x: sizeScale,\n                 y: sizeScale,\n                 curve: "linear"\n              });\,
-  \              boneAnim.scale.push({\n                 time,\n                 x: sizeScale,\n                 y: sizeScale,\n                 curve: "linear"\n              });\n\n              boneAnim.rotate.push({\n                 time,\n                 angle: state.rotation * -(180 / Math.PI),\n                 ...curveDefinition\n              });\
-);
-
-code = code.replace(
-  'boneAnim.scale.push({ time: (deathFrame + 1) / 24, x: 0, y: 0, curve: "stepped" });',
-  'boneAnim.scale.push({ time: (deathFrame + 1) / 24, x: 0, y: 0, curve: "stepped" });\n            boneAnim.rotate.push({ time: (deathFrame + 1) / 24, angle: 0, curve: "stepped" });'
-);
-
-fs.writeFileSync('src/Scene3D.tsx', code);
-console.log('Fixed export');
+code = code.replace(badStr, newStr);
+fs.writeFileSync('src/FireGenerator.tsx', code);
+console.log('Fixed syntax error!');
