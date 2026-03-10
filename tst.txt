@@ -1,0 +1,1 @@
+src/Scene3D.tsx(3816,17): error TS2304: Cannot find name 'sequenceAnim'.

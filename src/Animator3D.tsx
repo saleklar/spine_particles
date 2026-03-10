@@ -1280,6 +1280,33 @@ export function Animator3D({ onExportToParticleSystem, autoRenderOnChange, embed
                     }))}
                     style={{ width: '100%', marginBottom: '10px' }}
                   />
+
+                  <label style={{ display: 'block', marginBottom: '4px', fontSize: '12px' }}>
+                    Coin Ridges (Count)
+                  </label>
+                  <input
+                    type="number"
+                    value={project.object.geometryParams.coinRidgeCount ?? 0}
+                    onChange={(e) => setProject(prev => ({
+                      ...prev, object: { ...prev.object, geometryParams: { ...prev.object.geometryParams, coinRidgeCount: Number(e.target.value) } }
+                    }))}
+                    style={{ width: '100%', padding: '6px', marginBottom: '8px' }}
+                  />
+                  <label style={{ display: 'block', marginBottom: '4px', fontSize: '12px' }}>
+                    Coin Ridges Depth: {((project.object.geometryParams.coinRidgeDepth ?? 1.0) * 100).toFixed(0)}%
+                  </label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="5"
+                    step="0.1"
+                    value={project.object.geometryParams.coinRidgeDepth ?? 1.0}
+                    onChange={(e) => setProject(prev => ({
+                      ...prev, object: { ...prev.object, geometryParams: { ...prev.object.geometryParams, coinRidgeDepth: Number(e.target.value) } }
+                    }))}
+                    style={{ width: '100%', marginBottom: '10px' }}
+                  />
+
                   <label style={{ display: 'block', marginBottom: '4px', fontSize: '12px' }}>
                     Scene Edge Bevel: {((project.object.geometryParams.edgeBevel ?? 0) * 100).toFixed(0)}%
                   </label>

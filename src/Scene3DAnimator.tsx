@@ -956,9 +956,29 @@ case 'coin':
     const plateGeo = new THREE.CylinderGeometry(radius - fw/2, radius - fw/2, plateThickness, 64);
     plateGeo.rotateX(Math.PI / 2);
     geometries.push(plateGeo.toNonIndexed());
-    
+
     const rimShape = new THREE.Shape();
-    rimShape.absarc(0, 0, radius, 0, Math.PI * 2, false);
+    const ridgeCount = params.coinRidgeCount ?? 0;
+    const ridgeDepth = params.coinRidgeDepth ?? 1.0;
+    
+    if (ridgeCount > 0) {
+        const segments = Math.max(128, ridgeCount * 8);
+        for (let i = 0; i < segments; i++) {
+            const a = (i / segments) * Math.PI * 2;
+            const ridgePhase = (i / segments) * ridgeCount * Math.PI * 2;
+            // Create ridges by indenting the outer radius
+            const wave = (Math.sin(ridgePhase) + 1) * 0.5; // 0 to 1
+            const r = radius - wave * ridgeDepth;
+            if (i === 0) rimShape.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+            else rimShape.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+        }
+        // complete loop
+        const r0 = radius - ((Math.sin(0) + 1) * 0.5) * ridgeDepth;
+        rimShape.lineTo(Math.cos(0) * r0, Math.sin(0) * r0);
+    } else {
+        rimShape.absarc(0, 0, radius, 0, Math.PI * 2, false);
+    }
+
     const rimHole = new THREE.Path();
     rimHole.absarc(0, 0, radius - fw, 0, Math.PI * 2, true);
     rimShape.holes.push(rimHole);

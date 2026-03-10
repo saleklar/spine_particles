@@ -2160,8 +2160,8 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
                 if (particle.rotationSpeedMultiplier === undefined) {
                   particle.rotationSpeedMultiplier = 1;
                 }
-                particle.rotation = emitterRotation + (particle.rotationOffset ?? 0);
                 particle.rotationSpeed = emitterRotationSpeed * (particle.rotationSpeedMultiplier ?? 1);
+                particle.rotation = emitterRotation + (particle.rotationOffset ?? 0) + particle.rotationSpeed * particle.age;
 
                 const effectiveParticleType = getPreviewedParticleType(emitterParticleType);
                 const expectedSprite = effectiveParticleType === 'circles' || effectiveParticleType === 'glow-circles' || effectiveParticleType === 'sprites' || effectiveParticleType === '3d-model' || effectiveParticleType === 'stars';
@@ -2224,10 +2224,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
                   }
                 }
 
-                if (isPlayingRef.current) {
-                  particle.rotation = (particle.rotation ?? getParticleRotation(particle.mesh)) + ((particle.rotationSpeed ?? 0) * deltaTime);
-                }
-                setParticleRotation(particle.mesh, particle.rotation ?? getParticleRotation(particle.mesh));
+                setParticleRotation(particle.mesh, particle.rotation);
 
                 if (particle.colorOverLife) {
                   if (isWhiteDotPreview) {
@@ -3733,13 +3730,14 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
       
       if (frames.length === 0) return null;
 
-      const trackData = new Map<number, { frame: number, state: CachedParticleState }[]>();
+      const trackData = new Map<string, { frame: number, state: CachedParticleState }[]>();
 
       // Group states by trackId
       for (const [frameObj, states] of frames) {
         for (const state of states) {
-          if (!trackData.has(state.trackId)) trackData.set(state.trackId, []);
-          trackData.get(state.trackId)!.push({ frame: frameObj, state });
+          const uniqueId = `${state.emitterId}_${state.trackId}`;
+          if (!trackData.has(uniqueId)) trackData.set(uniqueId, []);
+          trackData.get(uniqueId)!.push({ frame: frameObj, state });
         }
       }
 
@@ -3768,7 +3766,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
         const slotName = 'slot_' + trackId;
         
         spineData.bones.push({ name: boneName, parent: "root" });
-        spineData.slots.push({ name: slotName, bone: boneName, attachment: "particle" });
+        spineData.slots.push({ name: slotName, bone: boneName, attachment: null });
 
         const firstState = history[0]?.state;
         const seqInfo = firstState ? emitterSequences.get(firstState.emitterId) : undefined;
@@ -3781,8 +3779,8 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
         } else {
             skinAttachments[slotName] = { "particle": { type: "region", name: "particles/png/particle", width: 64, height: 64 } };
         }
-        const boneAnim = { translate: [] as any[], scale: [] as any[] };
-        const slotAnim: any = { rgba: [] as any[] };
+        const boneAnim = { translate: [] as any[], scale: [] as any[], rotate: [] as any[] };
+        const slotAnim: any = { rgba: [] as any[], attachment: [] as any[] };
         let sequenceAnim: any = null;
         if (seqInfo && seqInfo.count > 0) {
             sequenceAnim = [] as any[];
@@ -3793,17 +3791,25 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
         }
 
         // Chunk history into contiguous life segments
-          const lifespans = [];
-          let currentLifespan = [];
+        if (history.length > 0 && history[0].frame > 0) {
+            slotAnim.attachment.push({ time: 0, name: null });
+            slotAnim.rgba.push({ time: 0, color: "ffffff00", curve: "stepped" });
+            boneAnim.scale.push({ time: 0, x: 0, y: 0, curve: "stepped" });
+            boneAnim.rotate.push({ time: 0, value: 0, curve: "stepped" });
+        }
+          const lifespans: {frame: number, state: CachedParticleState}[][] = [];
+          let currentLifespan: {frame: number, state: CachedParticleState}[] = [];
           let lastFrame = -2;
+          let lastAge = -1;
 
           for (const item of history) {
-            if (item.frame > lastFrame + 1 && lastFrame !== -2) {
+            if ((item.frame > lastFrame + 1 || item.state.age < lastAge) && lastFrame !== -2) {
               lifespans.push(currentLifespan);
               currentLifespan = [];
             }
             currentLifespan.push(item);
             lastFrame = item.frame;
+            lastAge = item.state.age;
           }
           if (currentLifespan.length > 0) lifespans.push(currentLifespan);
 
@@ -3811,12 +3817,16 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
           for (let i = 0; i < lifespans.length; i++) {
             const life = lifespans[i];
             if (life.length === 0) continue;
-            
-            // Rebirth gap invisible frame
+
+            // Rebirth gap invisible frame handling
             if (i > 0 || life[0].frame > 0) {
-              slotAnim.rgba.push({ time: (life[0].frame - 1) / 24, color: 'ffffff00' });
+              slotAnim.rgba.push({ time: Math.max(0, (life[0].frame - 1)) / 24, color: 'ffffff00', curve: "stepped" });
+              boneAnim.scale.push({ time: Math.max(0, (life[0].frame - 1)) / 24, x: 0, y: 0, curve: "stepped" });
+              boneAnim.rotate.push({ time: Math.max(0, (life[0].frame - 1)) / 24, value: 0, curve: "stepped" });
             }
             
+            slotAnim.attachment.push({ time: life[0].frame / 24, name: "particles/png/particle" });
+
             if (seqInfo && seqInfo.count > 0) {
                 sequenceAnim!.push({
                    time: life[0].frame / 24,
@@ -3828,7 +3838,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
 
             // Exactly 4 keys distributed evenly
             const maxKeys = 4;
-            const bakedKeys = [];
+            const bakedKeys: {frame: number, state: CachedParticleState}[] = [];
             if (life.length <= maxKeys) {
                 bakedKeys.push(...life);
             } else {
@@ -3841,24 +3851,46 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
             for (let k = 0; k < bakedKeys.length; k++) {
               const { frame, state } = bakedKeys[k];
               const time = frame / 24;
+
+              // Used real opacity from material instead of forcing fade
+              const finalAlpha = Math.floor(Math.max(0, Math.min(1, state.opacity)) * 255).toString(16).padStart(2, '0');
               
-              const alphaFade = Math.max(0, Math.min(1, 1 - (state.age / state.lifetime)));
-              const baseAlpha = Math.max(0, Math.min(1, state.opacity));
-              const finalAlpha = Math.floor(alphaFade * baseAlpha * 255).toString(16).padStart(2, '0');
-              
-              // Since `stepped` was crashing, let's explicitly inject `curve: "linear"` AGAIN just in case
-              // But ONLY for the properties that can take curves. Alpha/RGB usually does too, 
-              // but maybe Spine expects numbers or explicit strings specifically?
               const isLastKey = k === bakedKeys.length - 1;
-              const curveDefinition = !isLastKey ? { curve: "linear" } : {};
-              
-              slotAnim.rgba.push({ time, color: `ffffff${finalAlpha}`, ...curveDefinition });
+              const curveDefinition = !isLastKey ? { curve: "linear" } : { curve: "stepped" };
+
+              let translateCurveDefinition: any = curveDefinition;
+              if (!isLastKey) {
+                  const nextObj = bakedKeys[k + 1];
+                  const nextTime = nextObj.frame / 24;
+                  const dt = (nextTime - time) / 3;
+
+                  const curX = state.position.x * 10;
+                  const curY = state.position.y * 10;
+                  const curVelX = state.velocity.x * 10;
+                  const curVelY = state.velocity.y * 10;
+
+                  const nextX = nextObj.state.position.x * 10;
+                  const nextY = nextObj.state.position.y * 10;
+                  const nextVelX = nextObj.state.velocity.x * 10;
+                  const nextVelY = nextObj.state.velocity.y * 10;
+
+                  translateCurveDefinition = {
+                      curve: [
+                          time + dt, curX + curVelX * dt,
+                          nextTime - dt, nextX - nextVelX * dt,
+                          time + dt, curY + curVelY * dt,
+                          nextTime - dt, nextY - nextVelY * dt
+                      ]
+                  };
+              }
+
+              slotAnim.rgba.push({ time, color: `ffffff${finalAlpha}`, curve: "linear" });
 
               boneAnim.translate.push({
                  time,
                  x: state.position.x * 10,
                  y: state.position.y * 10,
-                 ...curveDefinition
+                 ...translateCurveDefinition
               });
 
               const sizeScale = Math.max(0.05, state.size * 4) / 64;
@@ -3866,15 +3898,22 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
                  time,
                  x: sizeScale,
                  y: sizeScale,
-                 ...curveDefinition
+                 curve: "linear"
               });
 
-              
+              boneAnim.rotate.push({
+                 time,
+                 value: state.rotation * -(180 / Math.PI),
+                 ...curveDefinition
+              });
             }
 
-            // Death invisible frame
+            // Death invisible frame toggle visibility
             const deathFrame = life[life.length - 1].frame;
-            slotAnim.rgba.push({ time: (deathFrame + 1) / 24, color: 'ffffff00' });
+            slotAnim.rgba.push({ time: (deathFrame + 1) / 24, color: 'ffffff00', curve: "stepped" });
+            boneAnim.scale.push({ time: (deathFrame + 1) / 24, x: 0, y: 0, curve: "stepped" });
+            boneAnim.rotate.push({ time: (deathFrame + 1) / 24, value: 0, curve: "stepped" });
+            slotAnim.attachment.push({ time: (deathFrame + 1) / 24, name: null });
           }
 
           spineData.animations.animation.bones[boneName] = boneAnim;

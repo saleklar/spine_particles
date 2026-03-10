@@ -144,8 +144,9 @@ export type AnimatorObject = {
     coinInnerShapeDepth?: number; // Extrusion depth of inner shape
     coinInnerShapePoints?: number; // e.g., 5 for star
     coinInnerShapeRoundness?: number; // Corners beveling / fillet
+    coinRidgeCount?: number; // Number of ridges on the outer edge (0 = none)
+    coinRidgeDepth?: number; // Depth/size of the ridges
 
-    
     // Sphere
     radius?: number;
     widthSegments?: number;
