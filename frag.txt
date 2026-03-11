@@ -1,0 +1,30 @@
+export const fragmentShader = `
+
+uniform float brightness;
+uniform float contrast;
+uniform float saturation;
+
+varying vec2 vUv;
+varying vec2 vUv;
+varying vec3 vColor;
+varying float vAlpha;
+
+void main() {
+    if (vAlpha <= 0.05) discard;
+    vec3 col = vColor;
+    col = col * brightness;
+    col = (col - 0.5) * contrast + 0.5;
+    float luma = dot(col, vec3(0.299, 0.587, 0.114));
+    col = mix(vec3(luma), col, saturation);
+    
+    
+    // Soft circle mask
+    float d = distance(vUv, vec2(0.5));
+    float softMask = smoothstep(0.5, 0.1, d);
+    gl_FragColor = vec4(clamp(col, 0.0, 1.0), vAlpha * 0.8 * softMask);
+    
+}
+
+`;
+
+export const FireGenerator: React.FC<FireGeneratorProps> = ({ onExport, onAttachToEmitter, embeddedUI, onExportToParticleSystem, autoRenderOnChange,

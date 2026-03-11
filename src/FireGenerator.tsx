@@ -80,7 +80,6 @@ uniform float emitterTurbulence;
 uniform float emitterSpeed;
 
 varying vec2 vUv;
-varying vec2 vUv;
 varying vec3 vColor;
 varying float vAlpha;
 
@@ -235,7 +234,6 @@ vec3 blackbody(float Temp) {
 
 void main() {
     vUv = uv;
-    vUv = uv;
     vec3 instancePos = (instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
     float t = loopProgress;
     float local_den = getDensity(instancePos, t);
@@ -273,7 +271,6 @@ uniform float brightness;
 uniform float contrast;
 uniform float saturation;
 
-varying vec2 vUv;
 varying vec2 vUv;
 varying vec3 vColor;
 varying float vAlpha;
