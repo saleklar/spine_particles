@@ -96,6 +96,8 @@ export type EmitterObject = SceneObject & {
     particleRotationSpeed: number;
     particleRotationSpeedVariation: number;
   particleHorizontalFlipChance?: number;
+  particlePivotX?: number;
+  particlePivotY?: number;
   particleStretch?: boolean;
   particleStretchAmount?: number;
     particleSpriteImageDataUrl?: string;
@@ -703,6 +705,8 @@ export function App() {
       particleRotationSpeed: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleRotationSpeed ?? 0),
       particleRotationSpeedVariation: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleRotationSpeedVariation ?? 0),
       particleHorizontalFlipChance: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleHorizontalFlipChance ?? 0),
+        particlePivotX: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particlePivotX ?? 0.5),
+        particlePivotY: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particlePivotY ?? 0.5),
       particleStretch: Boolean((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleStretch ?? false),
       particleStretchAmount: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleStretchAmount ?? 0.05),
       particleSpriteImageDataUrl: String((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleSpriteImageDataUrl ?? ''),
@@ -1547,6 +1551,38 @@ export function App() {
   const timelineRangeLength = Math.max(1, timelineOut - timelineIn + 1);
   const cachedRatio = Math.max(0, Math.min(1, cachedFrameCount / timelineRangeLength));
 
+  const handleDuplicateObject = useCallback(() => {
+    if (!selectedObjectId) return;
+    
+    setUndoStack((prevUndo) => [cloneSceneObjects(sceneObjects), ...prevUndo].slice(0, 100));
+    setRedoStack([]);
+
+    setSceneObjects((prevObjects) => {
+      const sourceObject = prevObjects.find(obj => obj.id === selectedObjectId);
+      if (!sourceObject) return prevObjects;
+
+      // Generate a new ID
+      const newId = `${sourceObject.type}-${Date.now()}`;
+      
+      // Clone the object, assigning the new ID, moving slightly to avoid overlap
+      const clonedObject = {
+        ...sourceObject,
+        id: newId,
+        name: `${sourceObject.name} (Copy)`,
+        position: {
+          x: sourceObject.position.x + 0.5,
+          y: sourceObject.position.y + 0.5,
+          z: sourceObject.position.z + 0.5
+        }
+      };
+
+      // Set the newly cloned object as selected immediately
+      setTimeout(() => setSelectedObjectId(newId), 0);
+
+      return [...prevObjects, clonedObject];
+    });
+  }, [selectedObjectId, sceneObjects]);
+
   const handleDeleteObject = useCallback(() => {
     if (!selectedObjectId) return;
     
@@ -1613,6 +1649,13 @@ export function App() {
       if (isModKey && !event.shiftKey && key === 'n') {
         event.preventDefault();
         handleNewScene();
+        return;
+      }
+
+      // Ctrl/Cmd+D: Duplicate
+      if (isModKey && key === 'd') {
+        event.preventDefault();
+        handleDuplicateObject();
         return;
       }
 
@@ -1692,7 +1735,7 @@ export function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleSave, handleSaveAs, handleOpen, handleUndo, handleRedo, handleDeleteObject, selectedObjectId, selectedKeyframeFrame, deleteKeyframeAtFrame, sceneObjects, startRenameObject]);
+  }, [handleSave, handleSaveAs, handleOpen, handleUndo, handleRedo, handleDuplicateObject, handleDeleteObject, selectedObjectId, selectedKeyframeFrame, deleteKeyframeAtFrame, sceneObjects, startRenameObject]);
 
   const hierarchyChildrenByParent = sceneObjects.reduce((acc, obj) => {
     const validParent = obj.parentId && sceneObjects.some((candidate) => candidate.id === obj.parentId)
@@ -3067,10 +3110,10 @@ export function App() {
                           onChange={(event) => handleUpdatePhysicsForce(force.id, { strength: Number.parseFloat(event.target.value) })}
                         />
 
-                        {(force.type === 'attractor' || force.type === 'repulsor' || force.type === 'tornado' || force.type === 'vortex') && (
+                        {(force.type === 'attractor' || force.type === 'repulsor' || force.type === 'tornado' || force.type === 'vortex' || force.type === 'turbulence') && (
                           <>
                             <label htmlFor="force-radius">
-                              Radius: {force.radius?.toFixed(1) ?? 50}
+                              {force.type === 'turbulence' ? 'Size (Deformation Map)' : 'Radius'}: {force.radius?.toFixed(1) ?? 50}
                             </label>
                             <input
                               id="force-radius"
@@ -4037,7 +4080,11 @@ export function App() {
                           value={selectedEmitterProperties.particleHorizontalFlipChance ?? 0}
                         />
 
-                        <hr style={{ margin: '0.5rem 0', borderColor: '#3b455c' }} />
+                        <label htmlFor="particle-pivot-x">Pivot X (0-1): {selectedEmitterProperties.particlePivotX ?? 0.5}</label>
+<input id="particle-pivot-x" max={1} min={0} onChange={(event) => handleUpdateEmitterProperty('particlePivotX', Number.parseFloat(event.target.value))} step={0.05} type="range" value={selectedEmitterProperties.particlePivotX ?? 0.5} />
+<label htmlFor="particle-pivot-y">Pivot Y (0-1): {selectedEmitterProperties.particlePivotY ?? 0.5}</label>
+<input id="particle-pivot-y" max={1} min={0} onChange={(event) => handleUpdateEmitterProperty('particlePivotY', Number.parseFloat(event.target.value))} step={0.05} type="range" value={selectedEmitterProperties.particlePivotY ?? 0.5} />
+<hr style={{ margin: '0.5rem 0', borderColor: '#3b455c' }} />
 
                         <label htmlFor="particle-opacity-over-life">
                           <input

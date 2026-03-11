@@ -1514,14 +1514,17 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
       };
 
       const createParticleMesh = (
-        position: THREE.Vector3,
-        color = '#ffffff',
-        size = 3,
-        opacity = 1,
-        particleType: ParticleVisualType = 'dots',
-        customGlow = false,
-        rotation = 0,
-        spriteTexture?: THREE.Texture
+          position: THREE.Vector3,
+          color = '#ffffff',
+          size = 3,
+          opacity = 1,
+          particleType: ParticleVisualType = 'dots',
+          customGlow = false,
+          rotation = 0,
+          spriteTexture?: THREE.Texture,
+          pivotX: number = 0.5,
+          pivotY: number = 0.5,
+          flipX: boolean = false
       ) => {
         const resolvedParticleType = (particleType ?? 'dots') as ParticleVisualType;
         const shouldUseSprite = resolvedParticleType === 'circles' || resolvedParticleType === 'glow-circles' || resolvedParticleType === 'sprites' || resolvedParticleType === '3d-model' || resolvedParticleType === 'stars';
@@ -1538,7 +1541,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
           });
           const sprite = new THREE.Sprite(spriteMaterial);
           sprite.position.copy(position);
-          setParticleSize(sprite, size);
+          setParticleSize(sprite, size, flipX);
           setParticleRotation(sprite, rotation);
           sprite.visible = sceneSettingsRef.current.showParticles ?? true;
           return sprite;
