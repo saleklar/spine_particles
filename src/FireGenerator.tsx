@@ -42,6 +42,7 @@ export interface GeneratorParams {
   useBlackbody?: boolean;
   baseTemperature?: number;
   peakTemperature?: number;
+  globalWarpAmount?: number;
 }
 
   export interface SavedPreset {
@@ -246,6 +247,13 @@ float fbm(vec3 x) {
   }
 
   float getDensity(vec3 p, float t) {
+    if (globalWarpAmount > 0.0) {
+        float gw = globalWarpAmount;
+        // Low frequency global warp to bend the whole shape slowly
+        p.x += snoise3(p * 1.5 + vec3(0.0, t * 1.5, 12.3)) * gw;
+        p.y += snoise3(p * 1.5 + vec3(45.6, -t * 1.5, 0.0)) * gw;
+        p.z += snoise3(p * 1.5 + vec3(78.9, 0.0, t * 1.5)) * gw;
+    }
     vec3 np = p * scale * 0.5;
     // FDS Thermodynamics Approximation: Buoyancy causes vertical velocity to increase with height (temperature gradient)
     vec3 advection = flowDirection * t * 1.5;
@@ -1119,6 +1127,12 @@ const [params, setParams] = useState<GeneratorParams>(() => {
           </label>
           <input type="range" min="0.0" max="2.0" step="0.05" value={params.detail} onChange={e => setParams({...params, detail: parseFloat(e.target.value)})} style={{width:'100%'}}/>
         </div>
+          <div style={{ marginTop: '10px' }}>
+            <label style={{display: 'block', fontSize: '12px', marginBottom:'5px'}} title="Manually warps the overall overall shape structure">Global Warp (Shape Morph)</label>
+            <input type="range" min="0" max="2" step="0.05" value={params.globalWarpAmount ?? 0.0} onChange={e => setParams({...params, globalWarpAmount: parseFloat(e.target.value)})} style={{width:'100%'}}/>
+            <div style={{fontSize:'10px', color:'#aaa', textAlign:'right'}}>{(params.globalWarpAmount ?? 0.0).toFixed(2)}</div>
+          </div>
+        
 
         <div>
           <label style={{display: 'block', fontSize: '12px', marginBottom:'5px'}}>Fire Shape</label>

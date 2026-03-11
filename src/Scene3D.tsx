@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import * as THREE from 'three';
+const flippedTextureCache = new WeakMap<THREE.Texture, THREE.Texture>();
+
 import Stats from 'three/examples/jsm/libs/stats.module.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { SceneObject, EmitterObject, EmitterShapeObject, SnapSettings, PhysicsForce } from './App';
@@ -1495,23 +1497,32 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
         return texture;
       };
 
-      const resolveSpriteTexture = (imageDataUrl: string, sequenceDataUrls: string[], age: number, fps: number = 12, mode: string = 'loop', particleLifetime: number = 1) => {
-        const validSequence = Array.isArray(sequenceDataUrls)
-          ? sequenceDataUrls.filter((url) => typeof url === 'string' && url.length > 0)
-          : [];
+      const resolveSpriteTexture = (imageDataUrl: string, sequenceDataUrls: string[], age: number, fps: number = 12, mode: string = 'loop', particleLifetime: number = 1, trackId: number = 0) => {
+          const validSequence = Array.isArray(sequenceDataUrls)
+            ? sequenceDataUrls.filter((url) => typeof url === 'string' && url.length > 0)
+            : [];
 
-        if (validSequence.length > 0) {
-          const sequenceFps = fps;
-          const frameIndex = Math.floor(Math.max(0, age) * sequenceFps) % validSequence.length;
-          return getExternalSpriteTexture(validSequence[frameIndex]);
-        }
+          if (validSequence.length > 0) {
+            let frameIndex = 0;
+            if (mode === 'random-static') {
+               frameIndex = Math.abs(trackId * 2654435761) % validSequence.length;
+            } else if (mode === 'match-life') {
+               let progress = Math.max(0, age) / Math.max(0.001, particleLifetime);
+               if (progress > 0.999) progress = 0.999;
+               frameIndex = Math.floor(progress * validSequence.length);
+            } else {
+               const sequenceFps = fps;
+               frameIndex = Math.floor(Math.max(0, age) * sequenceFps) % validSequence.length;
+            }
+            return getExternalSpriteTexture(validSequence[frameIndex]);
+          }
 
-        if (imageDataUrl && imageDataUrl.length > 0) {
-          return getExternalSpriteTexture(imageDataUrl);
-        }
+          if (imageDataUrl && imageDataUrl.length > 0) {
+            return getExternalSpriteTexture(imageDataUrl);
+          }
 
-        return undefined;
-      };
+          return undefined;
+        };
 
       const createParticleMesh = (
           position: THREE.Vector3,
@@ -1531,9 +1542,17 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
         const texture = getParticleTexture(resolvedParticleType, customGlow);
 
         if (shouldUseSprite) {
+          let baseMap = (resolvedParticleType === 'sprites' || resolvedParticleType === '3d-model') && spriteTexture ? spriteTexture : texture;
+          if (baseMap && flipX) {
+            baseMap = baseMap.clone();
+            baseMap.repeat.x = -1;
+            baseMap.offset.x = 1;
+            baseMap.needsUpdate = true;
+          }
+
           const spriteMaterial = new THREE.SpriteMaterial({
             color: new THREE.Color(color),
-            map: (resolvedParticleType === 'sprites' || resolvedParticleType === '3d-model') && spriteTexture ? spriteTexture : texture,
+            map: baseMap,
             transparent: true,
             opacity,
             depthWrite: !customGlow,
@@ -1541,6 +1560,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
           });
           const sprite = new THREE.Sprite(spriteMaterial);
           sprite.position.copy(position);
+          sprite.center.set(flipX ? 1.0 - pivotX : pivotX, pivotY);
           setParticleSize(sprite, size, flipX);
           setParticleRotation(sprite, rotation);
           sprite.visible = sceneSettingsRef.current.showParticles ?? true;
@@ -1653,7 +1673,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
           const emitterSpriteSequenceFps = seqProps.fps;
           const restoredSpeedMultiplier = 1 - emitterRotationSpeedVariation * 0.5 + Math.random() * emitterRotationSpeedVariation;
           const restoredSpriteTexture = (emitterParticleType === 'sprites' || emitterParticleType === '3d-model')
-            ? resolveSpriteTexture(emitterSpriteImageDataUrl, emitterSpriteSequenceDataUrls, cached.age, emitterSpriteSequenceFps, String(emitterProps.particleSpriteSequenceMode ?? 'loop'), Number(emitterProps.particleLifetime ?? 3))
+            ? resolveSpriteTexture(emitterSpriteImageDataUrl, emitterSpriteSequenceDataUrls, cached.age, emitterSpriteSequenceFps, String(emitterProps.particleSpriteSequenceMode ?? 'loop'), Number(emitterProps.particleLifetime ?? 3), cached.trackId)
             : undefined;
           const previewedType = getPreviewedParticleType(emitterParticleType);
           const previewedColor = getPreviewedParticleColor(emitterColor);
@@ -1990,8 +2010,17 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
                 const particleRotation = emitterRotation + particleRotationOffset;
                 const particleRotationSpeedMultiplier = 1 - emitterRotationSpeedVariation * 0.5 + Math.random() * emitterRotationSpeedVariation;
                 const particleRotationSpeed = emitterRotationSpeed * particleRotationSpeedMultiplier;
+                
+                // Find lowest available track ID for pooling/Spine export bone reuse
+                const activeTracks = new Set<number>();
+                particleSystem.particles.forEach(p => activeTracks.add(p.trackId));
+                let spawnTrackId = 0;
+                while (activeTracks.has(spawnTrackId)) {
+                  spawnTrackId++;
+                }
+
                 const spawnSpriteTexture = (emitterParticleType === 'sprites' || emitterParticleType === '3d-model')
-                  ? resolveSpriteTexture(emitterSpriteImageDataUrl, emitterSpriteSequenceDataUrls, 0, emitterSpriteSequenceFps, String(emitterProps.particleSpriteSequenceMode ?? 'loop'), Number(emitterProps.particleLifetime ?? 3))
+                  ? resolveSpriteTexture(emitterSpriteImageDataUrl, emitterSpriteSequenceDataUrls, 0, emitterSpriteSequenceFps, String(emitterProps.particleSpriteSequenceMode ?? 'loop'), Number(emitterProps.particleLifetime ?? 3), spawnTrackId)
                   : undefined;
                 const previewedType = getPreviewedParticleType(emitterParticleType);
                 const previewedColor = getPreviewedParticleColor(particleColor);
@@ -2045,13 +2074,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
                 const emitterLifetimeVariation = emitterProps.particleLifetimeVariation ?? 0;
                 const particleLifetime = emitterLifetime * (1 - emitterLifetimeVariation * 0.5 + Math.random() * emitterLifetimeVariation);
 
-                // Find lowest available track ID for pooling/Spine export bone reuse
-                const activeTracks = new Set<number>();
-                particleSystem.particles.forEach(p => activeTracks.add(p.trackId));
-                let spawnTrackId = 0;
-                while (activeTracks.has(spawnTrackId)) {
-                  spawnTrackId++;
-                }
+
 
                 const particleFlipXChance = Number(emitterProps.particleHorizontalFlipChance ?? 0);
                 const flipX = Math.random() < particleFlipXChance;
@@ -2325,8 +2348,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
                 if (needsMeshSwap) {
                   const existingMaterial = getParticleMaterial(particle.mesh);
                   const replacementSpriteTexture = (emitterParticleType === 'sprites' || emitterParticleType === '3d-model')
-                    ? resolveSpriteTexture(particle.spriteImageDataUrl ?? '', particle.spriteSequenceDataUrls ?? [], particle.age, currentEmitterFps
-                    , String(emitterProps.particleSpriteSequenceMode ?? 'loop'), particle.lifetime)
+                    ? resolveSpriteTexture(particle.spriteImageDataUrl ?? '', particle.spriteSequenceDataUrls ?? [], particle.age, currentEmitterFps, String(emitterProps.particleSpriteSequenceMode ?? 'loop'), particle.lifetime, particle.trackId)
                     : undefined;
                   const replacementMesh = createParticleMesh(
                     particle.mesh.position.clone(),
@@ -2370,8 +2392,19 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
                   }
 
                 if ((effectiveParticleType === 'sprites' || effectiveParticleType === '3d-model')) {
-                  const spriteTexture = resolveSpriteTexture(particle.spriteImageDataUrl ?? '', particle.spriteSequenceDataUrls ?? [], particle.age, currentEmitterFps
-                  , String(emitterProps.particleSpriteSequenceMode ?? 'loop'), particle.lifetime);
+                  let spriteTexture = resolveSpriteTexture(particle.spriteImageDataUrl ?? '', particle.spriteSequenceDataUrls ?? [], particle.age, currentEmitterFps, String(emitterProps.particleSpriteSequenceMode ?? 'loop'), particle.lifetime, particle.trackId);
+                  
+                  if (particle.flipX && spriteTexture) {
+                    let flipped = flippedTextureCache.get(spriteTexture);
+                    if (!flipped) {
+                        flipped = spriteTexture.clone();
+                        flipped.repeat.x = -1;
+                        flipped.offset.x = 1;
+                        flippedTextureCache.set(spriteTexture, flipped);
+                    }
+                    spriteTexture = flipped;
+                  }
+
                   if (material.map !== (spriteTexture ?? null)) {
                     material.map = spriteTexture ?? null;
                     material.needsUpdate = true;

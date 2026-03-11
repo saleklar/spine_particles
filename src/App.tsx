@@ -105,7 +105,7 @@ export type EmitterObject = SceneObject & {
     particleSpriteSequenceDataUrls?: string[];
     particleSpriteSequenceFirstName?: string;
     particleSpriteSequenceFps?: number;
-      particleSpriteSequenceMode?: 'loop' | 'match-life';
+      particleSpriteSequenceMode?: 'loop' | 'match-life' | 'random-static';
     particleSpeedVariation: number;
     particleLifetimeVariation: number;
     particleSizeVariation: number;
@@ -3815,7 +3815,20 @@ export function App() {
                                 <label>
                                   Sprite: {selectedEmitterProperties.particleSpriteSequenceFirstName || 'sequence.png'} (sequence used)
                                 </label>
-                                <label htmlFor="particle-sprite-sequence-fps">
+                                
+                                <label style={{marginTop: '10px'}}>
+                                  Sequence Mode
+                                </label>
+                                <select
+                                  value={selectedEmitterProperties.particleSpriteSequenceMode ?? 'loop'}
+                                  onChange={(e) => handleUpdateEmitterProperty('particleSpriteSequenceMode', e.target.value)}
+                                  className="property-input"
+                                >
+                                  <option value="loop">Loop</option>
+                                  <option value="match-life">Match Life</option>
+                                  <option value="random-static">Random Frame (Static)</option>
+                                </select>
+<label htmlFor="particle-sprite-sequence-fps">
                                   Sequence FPS: {selectedEmitterProperties.particleSpriteSequenceFps ?? 12}
                                 </label>
                                 <input
