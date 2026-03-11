@@ -67,7 +67,7 @@ export const generateFireSequenceHeadless = async (params: GeneratorParams): Pro
     const GRID_SIZE = params.domainResolution || 24;
     const DOMAIN_SIZE = 4.8; // Keep overall fire volume constant
     const SPACING = DOMAIN_SIZE / GRID_SIZE;
-    const geometry = new THREE.BoxGeometry(SPACING*0.9, SPACING*0.9, SPACING*0.9);
+    const geometry = new THREE.PlaneGeometry(SPACING * 1.5, SPACING * 1.5);
 
     
     // Convert hex to THREE.Color

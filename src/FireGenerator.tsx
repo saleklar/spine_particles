@@ -79,6 +79,8 @@ uniform float alphaThreshold;
 uniform float emitterTurbulence;
 uniform float emitterSpeed;
 
+varying vec2 vUv;
+varying vec2 vUv;
 varying vec3 vColor;
 varying float vAlpha;
 
@@ -232,6 +234,8 @@ vec3 blackbody(float Temp) {
 }
 
 void main() {
+    vUv = uv;
+    vUv = uv;
     vec3 instancePos = (instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
     float t = loopProgress;
     float local_den = getDensity(instancePos, t);
@@ -256,8 +260,9 @@ void main() {
     }
     
     vec3 scalePos = position * clamp(local_den * 1.5, 0.2, 1.0);
-    vec4 worldPos = modelMatrix * instanceMatrix * vec4(scalePos, 1.0);
-    gl_Position = projectionMatrix * viewMatrix * worldPos;
+        vec4 mvPosition = viewMatrix * modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+    mvPosition.xyz += vec3(scalePos.xy, 0.0);
+        gl_Position = projectionMatrix * mvPosition;
 }
 
 `;
@@ -268,6 +273,8 @@ uniform float brightness;
 uniform float contrast;
 uniform float saturation;
 
+varying vec2 vUv;
+varying vec2 vUv;
 varying vec3 vColor;
 varying float vAlpha;
 
@@ -279,7 +286,12 @@ void main() {
     float luma = dot(col, vec3(0.299, 0.587, 0.114));
     col = mix(vec3(luma), col, saturation);
     
-    gl_FragColor = vec4(clamp(col, 0.0, 1.0), vAlpha * 0.8);
+    
+    // Soft circle mask
+    float d = distance(vUv, vec2(0.5));
+    float softMask = smoothstep(0.5, 0.1, d);
+    gl_FragColor = vec4(clamp(col, 0.0, 1.0), vAlpha * 0.8 * softMask);
+    
 }
 
 `;
@@ -488,7 +500,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
     const GRID_SIZE = params.domainResolution || 24;
     const DOMAIN_SIZE = 4.8;
     const SPACING = DOMAIN_SIZE / GRID_SIZE;
-    const geometry = new THREE.BoxGeometry(SPACING*0.9, SPACING*0.9, SPACING*0.9);
+    const geometry = new THREE.PlaneGeometry(SPACING * 1.5, SPACING * 1.5);
     const GRID_SIZE_Y = Math.floor(GRID_SIZE * 2.5);
     const COUNT = GRID_SIZE * GRID_SIZE_Y * GRID_SIZE;
     const mesh = new THREE.InstancedMesh(geometry, materialRef.current, COUNT); 
@@ -553,7 +565,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
     const GRID_SIZE = params.domainResolution || 24;
     const DOMAIN_SIZE = 4.8; // Keep overall fire volume constant
     const SPACING = DOMAIN_SIZE / GRID_SIZE;
-    const geometry = new THREE.BoxGeometry(SPACING*0.9, SPACING*0.9, SPACING*0.9);
+    const geometry = new THREE.PlaneGeometry(SPACING * 1.5, SPACING * 1.5);
 
     
     const material = new THREE.ShaderMaterial({
@@ -1013,7 +1025,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
 
         <div>
           <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-            <span>Domain Distortion (Turbulence)</span>
+            <input type="number" value={params.distortion} onChange={e => setParams({...params, distortion: parseFloat(e.target.value)})} step="0.05" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
             <span>{params.distortion.toFixed(2)}</span>
           </label>
           <input type="range" min="0.0" max="3.0" step="0.05" value={params.distortion} onChange={e => setParams({...params, distortion: parseFloat(e.target.value)})} style={{width:'100%'}}/>
@@ -1021,7 +1033,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
 
         <div>
           <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-            <span>Domain Resolution</span>
+            <input type="number" value={params.domainResolution || 24} onChange={e => setParams({...params, domainResolution: parseInt(e.target.value)})} step="1" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
             <span>{params.domainResolution || 24}</span>
           </label>
           <input type="range" min="8" max="150" step="1" value={params.domainResolution || 24} onChange={e => setParams({...params, domainResolution: parseInt(e.target.value)})} style={{width:'100%'}}/>
@@ -1029,7 +1041,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
 
                 <div>
           <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-            <span>Flow Dir X</span>
+            <input type="number" value={params.flowX || 0} onChange={e => setParams({...params, flowX: parseFloat(e.target.value)})} step="0.1" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
             <span>{(params.flowX || 0).toFixed(2)}</span>
           </label>
           <input type="range" min="-5.0" max="5.0" step="0.1" value={params.flowX || 0} onChange={e => setParams({...params, flowX: parseFloat(e.target.value)})} style={{width:'100%'}}/>
@@ -1037,7 +1049,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
 
         <div>
           <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-            <span>Flow Dir Y</span>
+            <input type="number" value={params.flowY || 0} onChange={e => setParams({...params, flowY: parseFloat(e.target.value)})} step="0.1" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
             <span>{(params.flowY || 0).toFixed(2)}</span>
           </label>
           <input type="range" min="-5.0" max="5.0" step="0.1" value={params.flowY || 0} onChange={e => setParams({...params, flowY: parseFloat(e.target.value)})} style={{width:'100%'}}/>
@@ -1045,7 +1057,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
 
         <div>
           <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-            <span>Flow Dir Z</span>
+            <input type="number" value={params.flowZ || 0} onChange={e => setParams({...params, flowZ: parseFloat(e.target.value)})} step="0.1" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
             <span>{(params.flowZ || 0).toFixed(2)}</span>
           </label>
           <input type="range" min="-5.0" max="5.0" step="0.1" value={params.flowZ || 0} onChange={e => setParams({...params, flowZ: parseFloat(e.target.value)})} style={{width:'100%'}}/>
@@ -1053,7 +1065,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
 
         <div>
           <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-            <span>Rotation X</span>
+            <input type="number" value={params.rotX || 0} onChange={e => setParams({...params, rotX: parseFloat(e.target.value)})} step="0.1" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
             <span>{(params.rotX || 0).toFixed(2)}</span>
           </label>
           <input type="range" min="0" max="6.28" step="0.1" value={params.rotX || 0} onChange={e => setParams({...params, rotX: parseFloat(e.target.value)})} style={{width:'100%'}}/>
@@ -1061,7 +1073,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
 
         <div>
           <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-            <span>Rotation Y</span>
+            <input type="number" value={params.rotY || 0} onChange={e => setParams({...params, rotY: parseFloat(e.target.value)})} step="0.1" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
             <span>{(params.rotY || 0).toFixed(2)}</span>
           </label>
           <input type="range" min="0" max="6.28" step="0.1" value={params.rotY || 0} onChange={e => setParams({...params, rotY: parseFloat(e.target.value)})} style={{width:'100%'}}/>
@@ -1069,7 +1081,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
 
         <div>
           <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-            <span>Rotation Z</span>
+            <input type="number" value={params.rotZ || 0} onChange={e => setParams({...params, rotZ: parseFloat(e.target.value)})} step="0.1" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
             <span>{(params.rotZ || 0).toFixed(2)}</span>
           </label>
           <input type="range" min="0" max="6.28" step="0.1" value={params.rotZ || 0} onChange={e => setParams({...params, rotZ: parseFloat(e.target.value)})} style={{width:'100%'}}/>
@@ -1078,42 +1090,42 @@ const [params, setParams] = useState<GeneratorParams>(() => {
           <div style={{ fontSize: '13px', fontWeight: 'bold' }}>Rotation Speed</div>
           <div>
             <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-              <span>Rot Speed X</span>
+              <input type="number" value={params.rotSpeedX || 0} onChange={e => setParams({...params, rotSpeedX: parseFloat(e.target.value)})} step="0.1" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
               <span>{(params.rotSpeedX || 0).toFixed(2)}</span>
             </label>
             <input type="range" min="-5.0" max="5.0" step="0.1" value={params.rotSpeedX || 0} onChange={e => setParams({...params, rotSpeedX: parseFloat(e.target.value)})} style={{width:'100%'}}/>
           </div>
           <div>
             <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-              <span>Rot Speed Y</span>
+              <input type="number" value={params.rotSpeedY || 0} onChange={e => setParams({...params, rotSpeedY: parseFloat(e.target.value)})} step="0.1" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
               <span>{(params.rotSpeedY || 0).toFixed(2)}</span>
             </label>
             <input type="range" min="-5.0" max="5.0" step="0.1" value={params.rotSpeedY || 0} onChange={e => setParams({...params, rotSpeedY: parseFloat(e.target.value)})} style={{width:'100%'}}/>
           </div>
           <div>
             <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-              <span>Rot Speed Z</span>
+              <input type="number" value={params.rotSpeedZ || 0} onChange={e => setParams({...params, rotSpeedZ: parseFloat(e.target.value)})} step="0.1" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
               <span>{(params.rotSpeedZ || 0).toFixed(2)}</span>
             </label>
             <input type="range" min="-5.0" max="5.0" step="0.1" value={params.rotSpeedZ || 0} onChange={e => setParams({...params, rotSpeedZ: parseFloat(e.target.value)})} style={{width:'100%'}}/>
           </div>
             <div>
             <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-              <span>Thermal Buoyancy</span>
+              <input type="number" value={params.thermalBuoyancy ?? 1.0} onChange={e => setParams({...params, thermalBuoyancy: parseFloat(e.target.value)})} step="0.1" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
               <span>{params.thermalBuoyancy?.toFixed(2) || '1.00'}</span>
             </label>
             <input type="range" min="0.0" max="5.0" step="0.1" value={params.thermalBuoyancy ?? 1.0} onChange={e => setParams({...params, thermalBuoyancy: parseFloat(e.target.value)})} style={{width:'100%'}}/>
           </div>
           <div>
             <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-              <span>Vorticity Confinement</span>
+              <input type="number" value={params.vorticityConfinement ?? 1.0} onChange={e => setParams({...params, vorticityConfinement: parseFloat(e.target.value)})} step="0.1" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
               <span>{params.vorticityConfinement?.toFixed(2) || '1.00'}</span>
             </label>
             <input type="range" min="0.0" max="5.0" step="0.1" value={params.vorticityConfinement ?? 1.0} onChange={e => setParams({...params, vorticityConfinement: parseFloat(e.target.value)})} style={{width:'100%'}}/>
           </div>
           <div>
             <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-              <span>Fractal Detail</span>
+              <input type="number" value={params.detail} onChange={e => setParams({...params, detail: parseFloat(e.target.value)})} step="0.05" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
             <span>{params.detail.toFixed(2)}</span>
           </label>
           <input type="range" min="0.0" max="2.0" step="0.05" value={params.detail} onChange={e => setParams({...params, detail: parseFloat(e.target.value)})} style={{width:'100%'}}/>
@@ -1153,7 +1165,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
 
         <div>
           <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-            <span>Speed</span>
+            <input type="number" value={params.speed} onChange={e => setParams({...params, speed: parseFloat(e.target.value)})} step="0.1" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
             <span>{params.speed.toFixed(1)}</span>
           </label>
           <input type="range" min="0.1" max="10" step="0.1" value={params.speed} onChange={e => setParams({...params, speed: parseFloat(e.target.value)})} style={{width:'100%'}}/>
@@ -1161,7 +1173,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
 
         <div>
           <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-            <span>Noise Scale</span>
+            <input type="number" value={params.scale} onChange={e => setParams({...params, scale: parseFloat(e.target.value)})} step="0.1" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
             <span>{params.scale.toFixed(1)}</span>
           </label>
           <input type="range" min="0.5" max="10" step="0.1" value={params.scale} onChange={e => setParams({...params, scale: parseFloat(e.target.value)})} style={{width:'100%'}}/>
@@ -1169,14 +1181,14 @@ const [params, setParams] = useState<GeneratorParams>(() => {
 
         <div>
           <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-            <span>Core Contrast Bottom</span>
+            <input type="number" value={params.coreBottom} onChange={e => setParams({...params, coreBottom: parseFloat(e.target.value)})} step="0.1" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
             <span>{params.coreBottom.toFixed(2)}</span>
           </label>
           <input type="range" min="0.1" max="5" step="0.1" value={params.coreBottom} onChange={e => setParams({...params, coreBottom: parseFloat(e.target.value)})} style={{width:'100%'}}/>
         </div>
         <div>
           <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-            <span>Core Contrast Top</span>
+            <input type="number" value={params.coreTop} onChange={e => setParams({...params, coreTop: parseFloat(e.target.value)})} step="0.1" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
             <span>{params.coreTop.toFixed(2)}</span>
           </label>
           <input type="range" min="0.1" max="5" step="0.1" value={params.coreTop} onChange={e => setParams({...params, coreTop: parseFloat(e.target.value)})} style={{width:'100%'}}/>
@@ -1185,7 +1197,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
         
         <div>
           <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-            <span>Alpha Control</span>
+            <input type="number" value={params.alphaThreshold || 0.0} onChange={e => setParams({...params, alphaThreshold: parseFloat(e.target.value)})} step="0.01" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
             <span>{(params.alphaThreshold || 0).toFixed(2)}</span>
           </label>
           <input type="range" min="0.0" max="1.5" step="0.01" value={params.alphaThreshold || 0.0} onChange={e => setParams({...params, alphaThreshold: parseFloat(e.target.value)})} style={{width:'100%'}}/>
@@ -1193,7 +1205,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
 
         <div>
           <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-            <span>Emitter Turbulence</span>
+            <input type="number" value={params.emitterTurbulence ?? 0.5} onChange={e => setParams({...params, emitterTurbulence: parseFloat(e.target.value)})} step="0.05" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
             <span>{(params.emitterTurbulence ?? 0.5).toFixed(2)}</span>
           </label>
           <input type="range" min="0.0" max="2.0" step="0.05" value={params.emitterTurbulence ?? 0.5} onChange={e => setParams({...params, emitterTurbulence: parseFloat(e.target.value)})} style={{width:'100%'}}/>
@@ -1201,7 +1213,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
         
         <div>
           <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-            <span>Emitter Speed</span>
+            <input type="number" value={params.emitterSpeed ?? 1.0} onChange={e => setParams({...params, emitterSpeed: parseFloat(e.target.value)})} step="0.1" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
             <span>{(params.emitterSpeed ?? 1.0).toFixed(2)}</span>
           </label>
           <input type="range" min="0.0" max="5.0" step="0.1" value={params.emitterSpeed ?? 1.0} onChange={e => setParams({...params, emitterSpeed: parseFloat(e.target.value)})} style={{width:'100%'}}/>
@@ -1212,7 +1224,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
         <div>
           <label style={{display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px'}}>
             <input type="checkbox" checked={params.useBlackbody || false} onChange={e => setParams({...params, useBlackbody: e.target.checked})} />
-            <span>Use Physical Blackbody Mapping</span>
+            <input type="number" value={params.baseTemperature || 800} onChange={e => setParams({...params, baseTemperature: parseFloat(e.target.value)})} step="10" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
           </label>
         </div>
 
@@ -1228,7 +1240,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
 
             <div>
               <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-                <span>Peak Temp (K)</span>
+                <input type="number" value={params.peakTemperature || 3500} onChange={e => setParams({...params, peakTemperature: parseFloat(e.target.value)})} step="10" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
                 <span>{Math.round(params.peakTemperature || 3500)}</span>
               </label>
               <input type="range" min="1500" max="6000" step="10" value={params.peakTemperature || 3500} onChange={e => setParams({...params, peakTemperature: parseFloat(e.target.value)})} style={{width:'100%'}}/>
@@ -1238,7 +1250,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
 
         <div>
           <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-            <span>Brightness</span>
+            <input type="number" value={params.brightness} onChange={e => setParams({...params, brightness: parseFloat(e.target.value)})} step="0.05" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
             <span>{params.brightness.toFixed(2)}</span>
           </label>
           <input type="range" min="0.0" max="3.0" step="0.05" value={params.brightness} onChange={e => setParams({...params, brightness: parseFloat(e.target.value)})} style={{width:'100%'}}/>
@@ -1246,7 +1258,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
 
         <div>
           <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-            <span>Contrast</span>
+            <input type="number" value={params.contrast} onChange={e => setParams({...params, contrast: parseFloat(e.target.value)})} step="0.05" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
             <span>{params.contrast.toFixed(2)}</span>
           </label>
           <input type="range" min="0.0" max="3.0" step="0.05" value={params.contrast} onChange={e => setParams({...params, contrast: parseFloat(e.target.value)})} style={{width:'100%'}}/>
@@ -1254,7 +1266,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
 
         <div>
           <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-            <span>Saturation</span>
+            <input type="number" value={params.saturation} onChange={e => setParams({...params, saturation: parseFloat(e.target.value)})} step="0.05" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
             <span>{params.saturation.toFixed(2)}</span>
           </label>
           <input type="range" min="0.0" max="3.0" step="0.05" value={params.saturation} onChange={e => setParams({...params, saturation: parseFloat(e.target.value)})} style={{width:'100%'}}/>
@@ -1265,7 +1277,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
 
         <div>
           <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-            <span>Base Blur</span>
+            <input type="number" value={params.baseBlur ?? 0} onChange={e => setParams({...params, baseBlur: parseFloat(e.target.value)})} step="0.1" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
             <span>{(params.baseBlur ?? 0).toFixed(2)}</span>
           </label>
           <input type="range" min="0.0" max="20.0" step="0.1" value={params.baseBlur ?? 0} onChange={e => setParams({...params, baseBlur: parseFloat(e.target.value)})} style={{width:'100%'}}/>
@@ -1273,7 +1285,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
 
         <div>
           <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-            <span>Base Opacity</span>
+            <input type="number" value={params.baseOpacity ?? 1} onChange={e => setParams({...params, baseOpacity: parseFloat(e.target.value)})} step="0.05" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
             <span>{(params.baseOpacity ?? 1).toFixed(2)}</span>
           </label>
           <input type="range" min="0.0" max="2.0" step="0.05" value={params.baseOpacity ?? 1} onChange={e => setParams({...params, baseOpacity: parseFloat(e.target.value)})} style={{width:'100%'}}/>
@@ -1281,7 +1293,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
 
         <div>
           <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-            <span>Glow 1 Blur</span>
+            <input type="number" value={params.glow1Blur ?? 4} onChange={e => setParams({...params, glow1Blur: parseFloat(e.target.value)})} step="0.5" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
             <span>{(params.glow1Blur ?? 4).toFixed(2)}</span>
           </label>
           <input type="range" min="0.0" max="40.0" step="0.5" value={params.glow1Blur ?? 4} onChange={e => setParams({...params, glow1Blur: parseFloat(e.target.value)})} style={{width:'100%'}}/>
@@ -1289,7 +1301,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
 
         <div>
           <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-            <span>Glow 1 Opacity</span>
+            <input type="number" value={params.glow1Opacity ?? 0.6} onChange={e => setParams({...params, glow1Opacity: parseFloat(e.target.value)})} step="0.05" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
             <span>{(params.glow1Opacity ?? 0.6).toFixed(2)}</span>
           </label>
           <input type="range" min="0.0" max="2.0" step="0.05" value={params.glow1Opacity ?? 0.6} onChange={e => setParams({...params, glow1Opacity: parseFloat(e.target.value)})} style={{width:'100%'}}/>
@@ -1297,7 +1309,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
 
         <div>
           <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-            <span>Glow 2 Blur</span>
+            <input type="number" value={params.glow2Blur ?? 12} onChange={e => setParams({...params, glow2Blur: parseFloat(e.target.value)})} step="0.5" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
             <span>{(params.glow2Blur ?? 12).toFixed(2)}</span>
           </label>
           <input type="range" min="0.0" max="80.0" step="0.5" value={params.glow2Blur ?? 12} onChange={e => setParams({...params, glow2Blur: parseFloat(e.target.value)})} style={{width:'100%'}}/>
@@ -1305,7 +1317,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
 
         <div>
           <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-            <span>Glow 2 Opacity</span>
+            <input type="number" value={params.glow2Opacity ?? 0.3} onChange={e => setParams({...params, glow2Opacity: parseFloat(e.target.value)})} step="0.05" style={{ width: '50px', background: 'transparent', color: 'white', border: '1px solid #444', borderRadius: '3px', textAlign: 'right', fontSize: '11px', outline: 'none', padding: '0 4px' }} />
             <span>{(params.glow2Opacity ?? 0.3).toFixed(2)}</span>
           </label>
           <input type="range" min="0.0" max="2.0" step="0.05" value={params.glow2Opacity ?? 0.3} onChange={e => setParams({...params, glow2Opacity: parseFloat(e.target.value)})} style={{width:'100%'}}/>
