@@ -17,7 +17,7 @@ export interface GeneratorParams {
   frames: number;
   fps: number;
   resolution: number;
-  noiseType: 'simplex' | 'voronoi';
+  noiseType: 'simplex' | 'voronoi' | 'cellular' | 'value';
   distortion: number;
   detail: number;
   alphaThreshold: number;
@@ -149,12 +149,106 @@ float snoise3(vec3 v) {
   return 105.0 * dot( m*m, vec4( dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3) ) );
 }
 
+
+float hash(vec3 p) {
+    p = fract(p * vec3(12.9898, 78.233, 151.7182));
+    p += dot(p, p.yzx + 33.33);
+    return fract((p.x + p.y) * p.z);
+}
+
+float vnoise3(vec3 x) {
+    vec3 p = floor(x);
+    vec3 f = fract(x);
+    f = f*f*(3.0-2.0*f);
+    
+    return mix(mix(mix(hash(p+vec3(0,0,0)), hash(p+vec3(1,0,0)), f.x),
+                   mix(hash(p+vec3(0,1,0)), hash(p+vec3(1,1,0)), f.x), f.y),
+               mix(mix(hash(p+vec3(0,0,1)), hash(p+vec3(1,0,1)), f.x),
+                   mix(hash(p+vec3(0,1,1)), hash(p+vec3(1,1,1)), f.x), f.y), f.z) * 2.0 - 1.0;
+}
+
+float voronoi3(vec3 x) {
+    vec3 p = floor(x);
+    vec3 f = fract(x);
+    float res = 100.0;
+    for(int k=-1; k<=1; k++) {
+        for(int j=-1; j<=1; j++) {
+            for(int i=-1; i<=1; i++) {
+                vec3 b = vec3(float(i), float(j), float(k));
+                vec3 r = vec3(b) - f + hash(p + b);
+                float d = dot(r, r);
+                res = min(res, d);
+            }
+        }
+    }
+    return sqrt(res) * 2.0 - 1.0;
+}
+
+float getNoiseVal(vec3 x) {
+    if (noiseType > 2.5) {
+        return vnoise3(x);
+    } else if (noiseType > 1.5) {
+        return voronoi3(x*1.5);
+    } else if (noiseType > 0.5) {
+        return abs(snoise3(x)) * 2.0 - 1.0;
+    } else {
+        return snoise3(x);
+    }
+}
+
+
+float hash(vec3 p) {
+    p = fract(p * vec3(12.9898, 78.233, 151.7182));
+    p += dot(p, p.yzx + 33.33);
+    return fract((p.x + p.y) * p.z);
+}
+
+float vnoise3(vec3 x) {
+    vec3 p = floor(x);
+    vec3 f = fract(x);
+    f = f*f*(3.0-2.0*f);
+    
+    return mix(mix(mix(hash(p+vec3(0,0,0)), hash(p+vec3(1,0,0)), f.x),
+                   mix(hash(p+vec3(0,1,0)), hash(p+vec3(1,1,0)), f.x), f.y),
+               mix(mix(hash(p+vec3(0,0,1)), hash(p+vec3(1,0,1)), f.x),
+                   mix(hash(p+vec3(0,1,1)), hash(p+vec3(1,1,1)), f.x), f.y), f.z) * 2.0 - 1.0;
+}
+
+float voronoi3(vec3 x) {
+    vec3 p = floor(x);
+    vec3 f = fract(x);
+    float res = 100.0;
+    for(int k=-1; k<=1; k++) {
+        for(int j=-1; j<=1; j++) {
+            for(int i=-1; i<=1; i++) {
+                vec3 b = vec3(float(i), float(j), float(k));
+                vec3 r = vec3(b) - f + hash(p + b);
+                float d = dot(r, r);
+                res = min(res, d);
+            }
+        }
+    }
+    return sqrt(res) * 2.0 - 1.0;
+}
+
+float getNoiseVal(vec3 x) {
+    if (noiseType > 2.5) {
+        return vnoise3(x);
+    } else if (noiseType > 1.5) {
+        return voronoi3(x*1.5);
+    } else if (noiseType > 0.5) {
+        return abs(snoise3(x)) * 2.0 - 1.0;
+    } else {
+        return snoise3(x);
+    }
+}
+
 float fbm(vec3 x) {
     float v = 0.0;
     float a = 0.5;
     vec3 shift = vec3(100.0);
     for (int i = 0; i < 4; ++i) {
-        v += a * snoise3(x);
+        v += a * getNoiseVal(x);
         x = x * 2.0 + shift;
         a *= 0.5;
     }
@@ -470,7 +564,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
       frames: 30,
       fps: 30,
       resolution: 256,
-      noiseType: 'voronoi' as 'simplex' | 'voronoi',
+      noiseType: 'voronoi' as 'simplex' | 'voronoi' | 'cellular' | 'value',
       thermalBuoyancy: 1.0,
       vorticityConfinement: 1.0,
       distortion: 0.8,
@@ -519,7 +613,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
         brightness: { value: params.brightness },
         contrast: { value: params.contrast },
         saturation: { value: params.saturation },
-        noiseType: { value: params.noiseType === 'voronoi' ? 1.0 : 0.0 },
+        noiseType: { value: params.noiseType === 'value' ? 3.0 : (params.noiseType === 'cellular' ? 2.0 : (params.noiseType === 'voronoi' ? 1.0 : 0.0)) },
         distortion: { value: params.distortion },
         detail: { value: params.detail },
           
@@ -583,7 +677,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
       materialRef.current.uniforms.brightness.value = params.brightness;
       materialRef.current.uniforms.contrast.value = params.contrast;
       materialRef.current.uniforms.saturation.value = params.saturation;
-      materialRef.current.uniforms.noiseType.value = params.noiseType === 'voronoi' ? 1.0 : 0.0;
+      materialRef.current.uniforms.noiseType.value = params.noiseType === 'value' ? 3.0 : (params.noiseType === 'cellular' ? 2.0 : (params.noiseType === 'voronoi' ? 1.0 : 0.0));
       materialRef.current.uniforms.distortion.value = params.distortion;
       materialRef.current.uniforms.detail.value = params.detail;
       if(materialRef.current.uniforms.thermalBuoyancy) materialRef.current.uniforms.thermalBuoyancy.value = params.thermalBuoyancy !== undefined ? params.thermalBuoyancy : 1.0;
@@ -854,7 +948,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
           <label style={{display: 'block', fontSize: '12px', marginBottom:'5px'}}>Noise Algorithm</label>
           <select
             value={params.noiseType}
-            onChange={e => setParams({...params, noiseType: e.target.value as 'simplex' | 'voronoi'})}
+            onChange={e => setParams({...params, noiseType: e.target.value as 'simplex' | 'voronoi' | 'cellular' | 'value'})}
             style={{width:'100%', background:'#2a2a2a', border:'1px solid #444', color:'#fff', padding:'5px'}}
           >
             <option value="simplex">Simplex (Soft & Puffy)</option>
@@ -940,7 +1034,21 @@ const [params, setParams] = useState<GeneratorParams>(() => {
             </label>
             <input type="range" min="-5.0" max="5.0" step="0.1" value={params.rotSpeedZ || 0} onChange={e => setParams({...params, rotSpeedZ: parseFloat(e.target.value)})} style={{width:'100%'}}/>
           </div>
-  <div>
+            <div>
+            <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
+              <span>Thermal Buoyancy</span>
+              <span>{params.thermalBuoyancy?.toFixed(2) || '1.00'}</span>
+            </label>
+            <input type="range" min="0.0" max="5.0" step="0.1" value={params.thermalBuoyancy ?? 1.0} onChange={e => setParams({...params, thermalBuoyancy: parseFloat(e.target.value)})} style={{width:'100%'}}/>
+          </div>
+          <div>
+            <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
+              <span>Vorticity Confinement</span>
+              <span>{params.vorticityConfinement?.toFixed(2) || '1.00'}</span>
+            </label>
+            <input type="range" min="0.0" max="5.0" step="0.1" value={params.vorticityConfinement ?? 1.0} onChange={e => setParams({...params, vorticityConfinement: parseFloat(e.target.value)})} style={{width:'100%'}}/>
+          </div>
+          <div>
             <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
               <span>Fractal Detail</span>
             <span>{params.detail.toFixed(2)}</span>
