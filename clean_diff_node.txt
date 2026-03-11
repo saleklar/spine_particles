@@ -1,0 +1,257 @@
+diff --git a/src/Scene3D.tsx b/src/Scene3D.tsx
+index e82dc7e..e9c4f89 100644
+--- a/src/Scene3D.tsx
++++ b/src/Scene3D.tsx
+@@ -81,6 +81,7 @@ type SceneSettings = {
+   particleSequenceBudget?: number;
+   particleSequenceBudgetLoop?: boolean;
+   exportProjectionMode?: 'orthographic' | 'perspective';
++  exportFireBlendMode?: boolean;
+   cameraOrbitSpeed?: number;
+   referenceImage?: string | null;
+   referenceOpacity?: number;
+@@ -126,6 +127,7 @@ type CachedParticleState = {
+   opacity: number;
+   rotation: number;
+   size: number;
++    flipX?: boolean;
+ };
+
+ type ParticleVisualType = 'dots' | 'stars' | 'circles' | 'glow-circles' | 'spri
+tes' | '3d-model';                                                              @@ -136,7 +138,6 @@ export interface Scene3DRef {
+   getExportAssets: () => Promise<Array<{ name: string, blob: Blob }>>;
+ }
+
+-
+ const resampleSequence = (urls: string[], budget: number | undefined) => {     
+   if (!budget || budget <= 0 || urls.length <= budget) return urls;
+   const step = urls.length / budget;
+@@ -251,6 +252,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(
+({ sceneSize, sceneS                                                                   rotationSpeed?: number;
+       rotationSpeedMultiplier?: number;
+       rotationSpeedVariation?: number;
++      flipX?: boolean;
+       spriteImageDataUrl?: string;
+       spriteSequenceDataUrls?: string[];
+       opacityOverLife?: boolean;
+@@ -1423,13 +1425,13 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DPro
+ps>(({ sceneSize, sceneS                                                                 return texture;
+       };
+
+-      const setParticleSize = (mesh: THREE.Points | THREE.Sprite, size: number)
+ => {                                                                           +      const setParticleSize = (mesh: THREE.Points | THREE.Sprite, size: number,
+ flipX: boolean = false) => {                                                            if (mesh instanceof THREE.Points) {
+           const material = mesh.material as THREE.PointsMaterial;
+           material.size = size;
+         } else {
+           const spriteScale = Math.max(0.05, size * 4);
+-          mesh.scale.set(spriteScale, spriteScale, spriteScale);
++          mesh.scale.set(flipX ? -spriteScale : spriteScale, spriteScale, sprit
+eScale);                                                                                 }
+       };
+
+@@ -1451,7 +1453,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps
+>(({ sceneSize, sceneS                                                                   if (mesh instanceof THREE.Points) {
+           return (mesh.material as THREE.PointsMaterial).size;
+         }
+-        return mesh.scale.x / 4;
++        return Math.abs(mesh.scale.x) / 4;
+       };
+
+       const setParticleRotation = (mesh: THREE.Points | THREE.Sprite, rotation:
+ number) => {                                                                   @@ -1596,7 +1598,8 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps
+>(({ sceneSize, sceneS                                                                         age: particle.age,
+               opacity: material.opacity,
+               rotation: getParticleRotation(particle.mesh),
+-              size: particle.baseSize ?? getParticleSize(particle.mesh),       
++              size: getParticleSize(particle.mesh),
++              flipX: particle.flipX,
+             });
+           });
+         });
+@@ -1666,6 +1669,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps
+>(({ sceneSize, sceneS                                                                       cached.rotation,
+             (previewedType === 'sprites' || previewedType === '3d-model') ? res
+toredSpriteTexture : undefined                                                             );
++          setParticleSize(particleMesh, previewedSize, cached.flipX);
+
+           scene.add(particleMesh);
+           particleSystem.particles.push({
+@@ -1684,6 +1688,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps
+>(({ sceneSize, sceneS                                                                       rotationSpeedVariation: emitterRotationSpeedVariation,
+             baseSize: restoredSize,
+             sizeMultiplier: emitterSize > 0 ? (restoredSize / emitterSize) : 1,
++            flipX: cached.flipX,
+             spriteImageDataUrl: emitterSpriteImageDataUrl,
+             spriteSequenceDataUrls: emitterSpriteSequenceDataUrls,
+             positionHistory: [new THREE.Vector3(cached.position.x, cached.posit
+ion.y, cached.position.z)],                                                     @@ -1992,6 +1997,9 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps
+>(({ sceneSize, sceneS                                                                           const previewedSize = getPreviewedParticleSize(particleSize);  
+                 const previewedGlow = getPreviewedGlow(emitterGlow);
+
++                const particleFlipXChance = Number(emitterProps.particleHorizon
+talFlipChance ?? 0);                                                            +                const flipX = Math.random() < particleFlipXChance;
++
+                 const particleMesh = createParticleMesh(
+                   spawnPosition,
+                   previewedColor,
+@@ -2002,6 +2010,8 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps
+>(({ sceneSize, sceneS                                                                             particleRotation,
+                   (previewedType === 'sprites' || previewedType === '3d-model')
+ ? spawnSpriteTexture : undefined                                                                );
++                // initial flip update
++                setParticleSize(particleMesh, previewedSize, flipX);
+
+                 const emitterSpeed = emitterProps.particleSpeed ?? 50;
+                 const emitterSpeedVariation = emitterProps.particleSpeedVariati
+on ?? 0.2;                                                                      @@ -2066,6 +2076,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps
+>(({ sceneSize, sceneS                                                                             rotationSpeed: particleRotationSpeed,
+                   rotationSpeedMultiplier: particleRotationSpeedMultiplier,    
+                   rotationSpeedVariation: emitterRotationSpeedVariation,       
++                  flipX,
+                   spriteImageDataUrl: emitterSpriteImageDataUrl,
+                   spriteSequenceDataUrls: emitterSpriteSequenceDataUrls,       
+                   opacityOverLife: emitterProps.particleOpacityOverLife ?? fals
+e,                                                                              @@ -2332,9 +2343,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps
+>(({ sceneSize, sceneS                                                                             scene.remove(particle.mesh);
+                   scene.add(replacementMesh);
+                   particle.mesh = replacementMesh;
+-                }
+-
+-                // Apply particle appearance updates based on lifetime and curr
+ent emitter settings                                                            +                    setParticleSize(particle.mesh, getPreviewedParticleSize(par
+ticle.baseSize ?? 3), particle.flipX);                                                           const material = getParticleMaterial(particle.mesh);
+                 const progress = particle.lifetime > 0
+                   ? Math.min(1, Math.max(0, particle.age / particle.lifetime)) 
+@@ -2385,19 +2394,19 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DPro
+ps>(({ sceneSize, sceneS                                                                         const sizeOverLife = particle.sizeOverLife ?? 'none';
+                 const baseSize = particle.baseSize ?? 3;
+                 if (isWhiteDotPreview) {
+-                  setParticleSize(particle.mesh, previewDotSize);
++                  setParticleSize(particle.mesh, previewDotSize, particle.flipX
+);                                                                                               } else if (sizeOverLife === 'curve') {
+                     const curveValue = evaluateCurve(emitterProps?.particleSize
+OverLifeCurve, progress, 1);                                                    -                    setParticleSize(particle.mesh, baseSize * curveValue);     
++                    setParticleSize(particle.mesh, baseSize * curveValue, parti
+cle.flipX);                                                                                        } else if (sizeOverLife === 'curve') {
+                     const curveValue = evaluateCurve(emitterProps?.particleSize
+OverLifeCurve, progress, 1);                                                    -                    setParticleSize(particle.mesh, baseSize * curveValue);     
++                    setParticleSize(particle.mesh, baseSize * curveValue, parti
+cle.flipX);                                                                                        } else if (sizeOverLife === 'shrink') {
+-                    setParticleSize(particle.mesh, baseSize * (1 - progress)); 
++                    setParticleSize(particle.mesh, baseSize * (1 - progress), p
+article.flipX);                                                                                    } else if (sizeOverLife === 'grow') {
+-                    setParticleSize(particle.mesh, baseSize * (0.5 + progress *
+ 0.5));                                                                         +                    setParticleSize(particle.mesh, baseSize * (0.5 + progress *
+ 0.5), particle.flipX);                                                                            } else {
+-                    setParticleSize(particle.mesh, baseSize);
++                    setParticleSize(particle.mesh, baseSize, particle.flipX);  
+                   }
+               }
+             }
+@@ -3955,9 +3964,17 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProp
+s>(({ sceneSize, sceneS                                                         
+       // Cache emitter sequence info
+       const emitterSequences = new Map<string, { count: number, fps: number }>(
+);                                                                              +      const emitterGlows = new Map<string, boolean>();
++      const emitterNames = new Map<string, string>();
+       sceneObjectsRef.current.forEach(obj => {
+           if (obj.type === 'Emitter') {
++              const objName = obj.name || 'emitter';
++              const safeName = objName.toLowerCase().replace(/\s+/g, '_').repla
+ce(/[^a-z0-9_\-]/g, '_');                                                       +              emitterNames.set(obj.id, safeName);
++              spineData.bones.push({ name: safeName, parent: "root" });        
++
+               const props = obj.properties as any;
++              emitterGlows.set(obj.id, Boolean(props.particleGlow ?? false));  
+               const seqProps = getResampledSequenceProps(props, sceneSettings.p
+articleSequenceBudget, sceneSettings.particleSequenceBudgetLoop);                              const urls = seqProps.urls;
+               if (urls.length > 0) {
+@@ -3970,14 +3987,22 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DPro
+ps>(({ sceneSize, sceneS                                                               });
+
+       trackData.forEach((history, trackId) => {
+-        const boneName = `track_${trackId}`;
++        const firstState = history[0]?.state;
++        const emitterId = firstState?.emitterId;
++        const eName = emitterId ? (emitterNames.get(emitterId) || "emitter") : 
+"emitter";                                                                      +        const originalTrackId = firstState?.trackId ?? trackId;
+
+-        const slotName = 'slot_' + trackId;
+-
+-        spineData.bones.push({ name: boneName, parent: "root" });
+-        spineData.slots.push({ name: slotName, bone: boneName, attachment: null
+ });                                                                            +        const boneName = `${eName}_particle_${originalTrackId}`;
++        const slotName = `slot_${eName}_${originalTrackId}`;
++
++        spineData.bones.push({ name: boneName, parent: eName });
++
++        const slotData: any = { name: slotName, bone: boneName, attachment: nul
+l };                                                                            +        if (sceneSettings.exportFireBlendMode !== false && emitterId && emitter
+Glows.get(emitterId)) {                                                         +            slotData.blend = "additive";
++        }
++        spineData.slots.push(slotData);
+
+-        const firstState = history[0]?.state;
+         const seqInfo = firstState ? emitterSequences.get(firstState.emitterId)
+ : undefined;                                                                   
+         const skinAttachments = spineData.skins[0].attachments as any;
+@@ -4102,45 +4127,47 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DPro
+ps>(({ sceneSize, sceneS                                                                          ...translateCurveDefinition
+               });
+
+-              const sizeScale = Math.max(0.05, state.size * 4) / 64;
++              const sizeScale = (Math.max(0.05, state.size * 4) * 10) / 64;    
+               let scaleCurveDefinition: any = curveDefinition;
+               if (!isLastKey) {
+                   const nextObj = bakedKeys[k + 1];
+                   const nextTime = nextObj.frame / 24;
+                   const dt = (nextTime - time) / 3;
+-                  const nextSizeScale = Math.max(0.05, nextObj.state.size * 4) 
+/ 64;                                                                           -
++                  const nextSizeScale = (Math.max(0.05, nextObj.state.size * 4)
+ * 10) / 64;                                                                    +
+                   let curScaleVel = (nextSizeScale - sizeScale) / (nextTime - t
+ime);                                                                                              if (k > 0) {
+                       const prevObj = bakedKeys[k - 1];
+                       const prevTime = prevObj.frame / 24;
+-                      const prevSizeScale = Math.max(0.05, prevObj.state.size *
+ 4) / 64;                                                                       +                      const prevSizeScale = (Math.max(0.05, prevObj.state.size 
+* 4) * 10) / 64;                                                                                       curScaleVel = (nextSizeScale - prevSizeScale) / (nextTime
+ - prevTime);                                                                                      }
+-
++
+                   let nextScaleVel = curScaleVel;
+                   if (k < bakedKeys.length - 2) {
+                       const nextNextObj = bakedKeys[k + 2];
+                       const nextNextTime = nextNextObj.frame / 24;
+-                      const nextNextSizeScale = Math.max(0.05, nextNextObj.stat
+e.size * 4) / 64;                                                               +                      const nextNextSizeScale = (Math.max(0.05, nextNextObj.sta
+te.size * 4) * 10) / 64;                                                                               nextScaleVel = (nextNextSizeScale - sizeScale) / (nextNex
+tTime - time);                                                                                     } else {
+                       nextScaleVel = (nextSizeScale - sizeScale) / (nextTime - 
+time);                                                                                             }
+
++                  const scaleX1 = Math.max(0.01, sizeScale + curScaleVel * dt);
++                  const scaleX2 = Math.max(0.01, nextSizeScale - nextScaleVel *
+ dt);                                                                                              scaleCurveDefinition = {
+                       curve: [
+-                          time + dt, Math.max(0.01, sizeScale + curScaleVel * d
+t),                                                                             -                          nextTime - dt, Math.max(0.01, nextSizeScale - nextSca
+leVel * dt),                                                                    -                          time + dt, Math.max(0.01, sizeScale + curScaleVel * d
+t),                                                                             -                          nextTime - dt, Math.max(0.01, nextSizeScale - nextSca
+leVel * dt)                                                                     +                          time + dt, state.flipX ? -scaleX1 : scaleX1,
++                          nextTime - dt, state.flipX ? -scaleX2 : scaleX2,     
++                          time + dt, scaleX1,
++                          nextTime - dt, scaleX2
+                       ]
+                   };
+               }
+
+               boneAnim.scale.push({
+                  time,
+-                 x: sizeScale,
++                 x: state.flipX ? -sizeScale : sizeScale,
+                  y: sizeScale,
+                  ...scaleCurveDefinition
+               });

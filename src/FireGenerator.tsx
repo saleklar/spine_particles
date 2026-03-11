@@ -33,6 +33,15 @@ export interface GeneratorParams {
   rotSpeedZ?: number;
   thermalBuoyancy?: number;
   vorticityConfinement?: number;
+  baseBlur?: number;
+  baseOpacity?: number;
+  glow1Blur?: number;
+  glow1Opacity?: number;
+  glow2Blur?: number;
+  glow2Opacity?: number;
+  useBlackbody?: boolean;
+  baseTemperature?: number;
+  peakTemperature?: number;
 }
 
   export interface SavedPreset {
@@ -71,6 +80,9 @@ uniform float evolveOverLife;
 uniform vec3 rotationSpeed;
 uniform float thermalBuoyancy;
 uniform float vorticityConfinement;
+uniform bool useBlackbody;
+uniform float baseTemperature;
+uniform float peakTemperature;
 
 varying vec2 vUv;
 
@@ -105,6 +117,26 @@ vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
 vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
 vec4 permute(vec4 x) { return mod289(((x*34.0)+1.0)*x); }
 vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+
+// --- Blackbody Radiation ---
+vec3 blackbody(float temp) {
+    vec3 color = vec3(0.0);
+    temp /= 100.0;
+    if (temp <= 66.0) {
+        color.r = 255.0;
+        color.g = 99.4708025861 * log(temp) - 161.1195681661;
+        if (temp <= 19.0) {
+            color.b = 0.0;
+        } else {
+            color.b = 138.5177312231 * log(temp - 10.0) - 305.0447927307;
+        }
+    } else {
+        color.r = 329.698727446 * pow(temp - 60.0, -0.1332047592);
+        color.g = 288.1221695283 * pow(temp - 60.0, -0.0755148492);
+        color.b = 255.0;
+    }
+    return clamp(color / 255.0, 0.0, 1.0);
+}
 
 float snoise3(vec3 v) {
   const vec2  C = vec2(1.0/6.0, 1.0/3.0) ;
@@ -176,10 +208,10 @@ float voronoi3(vec3 x) {
     vec3 p = floor(x);
     vec3 f = fract(x);
     float res = 100.0;
-    for(int k=0; k<=1; k++) {
-        for(int j=0; j<=1; j++) {
-            for(int i=0; i<=1; i++) {
-                vec3 b = vec3(float(i) - 0.5, float(j) - 0.5, float(k) - 0.5);
+    for(int k=-1; k<=1; k++) {
+        for(int j=-1; j<=1; j++) {
+            for(int i=-1; i<=1; i++) {
+                vec3 b = vec3(float(i), float(j), float(k));
                 vec3 r = vec3(b) - f + hash3(p + b);
                 float d = dot(r, r);
                 res = min(res, d);
@@ -202,22 +234,18 @@ float getNoiseVal(vec3 x) {
 }
 
 float fbm(vec3 x) {
-    float v = 0.0;
-    float a = 0.5;
-    vec3 shift = vec3(100.0);
-    int octaves = (noiseType > 1.5 && noiseType < 2.5) ? 2 : 4;
-    int octaves = (noiseType > 1.5 && noiseType < 2.5) ? 2 : 4;
-    for (int i = 0; i < 4; ++i) {
-        if (i >= octaves) break;
-        if (i >= octaves) break;
-        v += a * getNoiseVal(x);
-        x = x * 2.0 + shift;
-        a *= 0.5;
-    }
-    return v;
-}
+      float v = 0.0;
+      float a = 0.5;
+      vec3 shift = vec3(100.0);
+      for (int i = 0; i < 4; ++i) {
+          v += a * getNoiseVal(x);
+          x = x * 2.0 + shift;
+          a *= 0.5;
+      }
+      return v;
+  }
 
-float getDensity(vec3 p, float t) {
+  float getDensity(vec3 p, float t) {
     vec3 np = p * scale * 0.5;
     // FDS Thermodynamics Approximation: Buoyancy causes vertical velocity to increase with height (temperature gradient)
     vec3 advection = flowDirection * t * 1.5;
@@ -290,11 +318,18 @@ vec4 computeVolumetric(float timePhase) {
         float density = getDensity(p, t);
 
         if(density > 0.01) {
-            vec3 fireColor = mix(color1, color2, smoothstep(0.1, 0.5, density));
-            fireColor = mix(fireColor, color3, smoothstep(0.5, 0.9, density));
-
-            float hot = pow(density, 6.0) * detail;
-            fireColor += vec3(1.0, 0.8, 0.4) * hot;
+            vec3 fireColor;
+            if (useBlackbody) {
+                float temp = mix(baseTemperature, peakTemperature, smoothstep(0.0, 1.0, density));
+                fireColor = blackbody(temp);
+                float hot = pow(density, 6.0) * detail;
+                fireColor += fireColor * hot;
+            } else {
+                fireColor = mix(color1, color2, smoothstep(0.1, 0.5, density));
+                fireColor = mix(fireColor, color3, smoothstep(0.5, 0.9, density));
+                float hot = pow(density, 6.0) * detail;
+                fireColor += vec3(1.0, 0.8, 0.4) * hot;
+            }
 
             float smokeMask = smoothstep(0.3, 0.0, density) * smoothstep(0.0, 1.0, p.y+0.5) * 0.5;
             fireColor = mix(fireColor, vec3(0.02), smokeMask);
@@ -505,6 +540,15 @@ const [params, setParams] = useState<GeneratorParams>(() => {
           if (parsed.rotX === undefined) parsed.rotX = 0;
           if (parsed.rotY === undefined) parsed.rotY = 0;
           if (parsed.rotZ === undefined) parsed.rotZ = 0;
+          if (parsed.baseBlur === undefined) parsed.baseBlur = 0.0;
+          if (parsed.baseOpacity === undefined) parsed.baseOpacity = 1.0;
+          if (parsed.glow1Blur === undefined) parsed.glow1Blur = 4.0;
+          if (parsed.glow1Opacity === undefined) parsed.glow1Opacity = 0.6;
+          if (parsed.glow2Blur === undefined) parsed.glow2Blur = 12.0;
+          if (parsed.glow2Opacity === undefined) parsed.glow2Opacity = 0.3;
+          if (parsed.useBlackbody === undefined) parsed.useBlackbody = false;
+          if (parsed.baseTemperature === undefined) parsed.baseTemperature = 800;
+          if (parsed.peakTemperature === undefined) parsed.peakTemperature = 3500;
           return parsed;
 
       } catch (e) {
@@ -530,12 +574,26 @@ const [params, setParams] = useState<GeneratorParams>(() => {
       thermalBuoyancy: 1.0,
       vorticityConfinement: 1.0,
       distortion: 0.8,
-      detail: 1.0, alphaThreshold: 0.0, flowX: 0, flowY: 1, flowZ: 0, rotX: 0, rotY: 0, rotZ: 0
+      detail: 1.0, alphaThreshold: 0.0, flowX: 0, flowY: 1, flowZ: 0, rotX: 0, rotY: 0, rotZ: 0,
+      baseBlur: 0.0,
+      baseOpacity: 1.0,
+      glow1Blur: 4.0,
+      glow1Opacity: 0.6,
+      glow2Blur: 12.0,
+      glow2Opacity: 0.3,
+      useBlackbody: false,
+      baseTemperature: 800,
+      peakTemperature: 3500
     };
   });
 
   useEffect(() => {
     localStorage.setItem('fireGeneratorParams', JSON.stringify(params));
+  }, [params]);
+
+  const paramsRef = useRef(params);
+  useEffect(() => {
+    paramsRef.current = params;
   }, [params]);
 
   const [isRendering, setIsRendering] = useState(false);
@@ -550,7 +608,16 @@ const [params, setParams] = useState<GeneratorParams>(() => {
     const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, preserveDrawingBuffer: true });
     renderer.setSize(width, height);
     rendererRef.current = renderer;
-    mountRef.current.appendChild(renderer.domElement);
+
+    const canvas2d = document.createElement('canvas');
+    canvas2d.width = width;
+    canvas2d.height = height;
+    canvas2d.style.position = 'absolute';
+    canvas2d.style.top = '0';
+    canvas2d.style.left = '0';
+    canvas2d.style.pointerEvents = 'none';
+    const ctx2d = canvas2d.getContext('2d');
+    mountRef.current.appendChild(canvas2d);
 
     const scene = new THREE.Scene();
     sceneRef.current = scene;
@@ -585,7 +652,10 @@ const [params, setParams] = useState<GeneratorParams>(() => {
           rotation: { value: new THREE.Vector3(params.rotX || 0, params.rotY || 0, params.rotZ || 0) },
             rotationSpeed: { value: new THREE.Vector3(params.rotSpeedX || 0, params.rotSpeedY || 0, params.rotSpeedZ || 0) },
           thermalBuoyancy: { value: params.thermalBuoyancy !== undefined ? params.thermalBuoyancy : 1.0 },
-          vorticityConfinement: { value: params.vorticityConfinement !== undefined ? params.vorticityConfinement : 1.0 }
+          vorticityConfinement: { value: params.vorticityConfinement !== undefined ? params.vorticityConfinement : 1.0 },
+          useBlackbody: { value: params.useBlackbody || false },
+          baseTemperature: { value: params.baseTemperature || 800 },
+          peakTemperature: { value: params.peakTemperature || 3500 }
         },
       transparent: true,
       blending: THREE.NormalBlending
@@ -600,25 +670,60 @@ const [params, setParams] = useState<GeneratorParams>(() => {
 
     const render = () => {
       animationId = requestAnimationFrame(render);
+      const currentParams = paramsRef.current;
+      
       if (materialRef.current) {
-        const loopDuration = params.frames / params.fps;
+        const loopDuration = currentParams.frames / currentParams.fps;
         const pg = (clock.getElapsedTime() % loopDuration) / loopDuration;
         materialRef.current.uniforms.loopProgress.value = pg;
       }
       renderer.render(scene, camera);
+
+      if (ctx2d) {
+        ctx2d.clearRect(0, 0, canvas2d.width, canvas2d.height);
+        
+        ctx2d.globalCompositeOperation = 'source-over';
+        ctx2d.filter = currentParams.baseBlur !== undefined && currentParams.baseBlur > 0 ? `blur(${currentParams.baseBlur}px)` : 'none';
+        ctx2d.globalAlpha = currentParams.baseOpacity !== undefined ? currentParams.baseOpacity : 1.0;
+        ctx2d.drawImage(renderer.domElement, 0, 0, canvas2d.width, canvas2d.height);
+
+        // First glow pass
+        ctx2d.globalCompositeOperation = 'screen';
+        ctx2d.filter = `blur(${currentParams.glow1Blur ?? 4}px)`;
+        ctx2d.globalAlpha = currentParams.glow1Opacity ?? 0.6;
+        ctx2d.drawImage(renderer.domElement, 0, 0, canvas2d.width, canvas2d.height);
+
+        // Second glow pass
+        ctx2d.filter = `blur(${currentParams.glow2Blur ?? 12}px)`;
+        ctx2d.globalAlpha = currentParams.glow2Opacity ?? 0.3;
+        ctx2d.drawImage(renderer.domElement, 0, 0, canvas2d.width, canvas2d.height);
+        
+        // Reset
+        ctx2d.filter = 'none';
+        ctx2d.globalAlpha = 1.0;
+        ctx2d.globalCompositeOperation = 'source-over';
+      }
     };
     render();
 
     const handleResize = () => {
       if (!mountRef.current || !rendererRef.current) return;
-      rendererRef.current.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight);
+      const w = mountRef.current.clientWidth;
+      const h = mountRef.current.clientHeight;
+      
+      rendererRef.current.setSize(w, h);
+      
+      canvas2d.width = w;
+      canvas2d.height = h;
     };
     window.addEventListener('resize', handleResize);
 
     return () => {
       window.removeEventListener('resize', handleResize);
       cancelAnimationFrame(animationId);
-      if (mountRef.current && renderer.domElement.parentNode === mountRef.current) mountRef.current.removeChild(renderer.domElement);
+      if (mountRef.current && canvas2d.parentNode === mountRef.current) {
+          mountRef.current.removeChild(canvas2d);
+      }
       renderer.dispose();
       material.dispose();
       geometry.dispose();
@@ -645,6 +750,10 @@ const [params, setParams] = useState<GeneratorParams>(() => {
       if(materialRef.current.uniforms.thermalBuoyancy) materialRef.current.uniforms.thermalBuoyancy.value = params.thermalBuoyancy !== undefined ? params.thermalBuoyancy : 1.0;
       if(materialRef.current.uniforms.vorticityConfinement) materialRef.current.uniforms.vorticityConfinement.value = params.vorticityConfinement !== undefined ? params.vorticityConfinement : 1.0;
       
+      if(materialRef.current.uniforms.useBlackbody) materialRef.current.uniforms.useBlackbody.value = params.useBlackbody || false;
+      if(materialRef.current.uniforms.baseTemperature) materialRef.current.uniforms.baseTemperature.value = params.baseTemperature || 800;
+      if(materialRef.current.uniforms.peakTemperature) materialRef.current.uniforms.peakTemperature.value = params.peakTemperature || 3500;
+
         materialRef.current.uniforms.alphaThreshold.value = params.alphaThreshold || 0.0;
         if (materialRef.current.uniforms.flowDirection) {
            materialRef.current.uniforms.flowDirection.value.set(params.flowX || 0, params.flowY || 1, params.flowZ || 0);
@@ -718,18 +827,19 @@ const [params, setParams] = useState<GeneratorParams>(() => {
 
           ctx.clearRect(0, 0, targetSize, targetSize);
           ctx.globalCompositeOperation = 'source-over';
-          ctx.filter = 'none';
+          ctx.filter = currentParams.baseBlur !== undefined && currentParams.baseBlur > 0 ? `blur(${currentParams.baseBlur}px)` : 'none';
+          ctx.globalAlpha = currentParams.baseOpacity !== undefined ? currentParams.baseOpacity : 1.0;
           ctx.drawImage(offCanvas, 0, 0);
 
           // First glow pass
           ctx.globalCompositeOperation = 'screen';
-          ctx.filter = 'blur(4px)';
-          ctx.globalAlpha = 0.6;
+          ctx.filter = `blur(${currentParams.glow1Blur ?? 4}px)`;
+          ctx.globalAlpha = currentParams.glow1Opacity ?? 0.6;
           ctx.drawImage(offCanvas, 0, 0);
 
           // Second glow pass
-          ctx.filter = 'blur(12px)';
-          ctx.globalAlpha = 0.3;
+          ctx.filter = `blur(${currentParams.glow2Blur ?? 12}px)`;
+          ctx.globalAlpha = currentParams.glow2Opacity ?? 0.3;
           ctx.drawImage(offCanvas, 0, 0);
         } else {
           ctx.putImageData(imageData, 0, 0);
@@ -1025,15 +1135,15 @@ const [params, setParams] = useState<GeneratorParams>(() => {
 
         <div>
           <label style={{display: 'block', fontSize: '12px', marginBottom:'5px'}}>Color 1 (Edge)</label>
-          <input type="color" value={params.color1} onChange={e => setParams({...params, color1: e.target.value})} style={{width:'100%'}}/>
+          <input type="color" value={params.color1} onChange={e => setParams({...params, color1: e.target.value})} style={{width:'100%'}} disabled={params.useBlackbody} />
         </div>
         <div>
           <label style={{display: 'block', fontSize: '12px', marginBottom:'5px'}}>Color 2 (Mid)</label>
-          <input type="color" value={params.color2} onChange={e => setParams({...params, color2: e.target.value})} style={{width:'100%'}}/>
+          <input type="color" value={params.color2} onChange={e => setParams({...params, color2: e.target.value})} style={{width:'100%'}} disabled={params.useBlackbody} />
         </div>
         <div>
           <label style={{display: 'block', fontSize: '12px', marginBottom:'5px'}}>Color 3 (Core)</label>
-          <input type="color" value={params.color3} onChange={e => setParams({...params, color3: e.target.value})} style={{width:'100%'}}/>
+          <input type="color" value={params.color3} onChange={e => setParams({...params, color3: e.target.value})} style={{width:'100%'}} disabled={params.useBlackbody} />
         </div>
 
         <div>
@@ -1076,7 +1186,34 @@ const [params, setParams] = useState<GeneratorParams>(() => {
           <input type="range" min="0.0" max="1.5" step="0.01" value={params.alphaThreshold || 0.0} onChange={e => setParams({...params, alphaThreshold: parseFloat(e.target.value)})} style={{width:'100%'}}/>
         </div>
         <hr style={{ borderColor: '#333', margin: '5px 0' }} />
-        <div style={{ fontSize: '13px', fontWeight: 'bold' }}>Color Correction</div>
+        <div style={{ fontSize: '13px', fontWeight: 'bold' }}>Color Correction & Physics</div>
+
+        <div>
+          <label style={{display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px'}}>
+            <input type="checkbox" checked={params.useBlackbody || false} onChange={e => setParams({...params, useBlackbody: e.target.checked})} />
+            <span>Use Physical Blackbody Mapping</span>
+          </label>
+        </div>
+
+        {params.useBlackbody && (
+          <>
+            <div>
+              <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
+                <span>Base Temp (K)</span>
+                <span>{Math.round(params.baseTemperature || 800)}</span>
+              </label>
+              <input type="range" min="300" max="2000" step="10" value={params.baseTemperature || 800} onChange={e => setParams({...params, baseTemperature: parseFloat(e.target.value)})} style={{width:'100%'}}/>
+            </div>
+
+            <div>
+              <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
+                <span>Peak Temp (K)</span>
+                <span>{Math.round(params.peakTemperature || 3500)}</span>
+              </label>
+              <input type="range" min="1500" max="6000" step="10" value={params.peakTemperature || 3500} onChange={e => setParams({...params, peakTemperature: parseFloat(e.target.value)})} style={{width:'100%'}}/>
+            </div>
+          </>
+        )}
 
         <div>
           <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
@@ -1100,6 +1237,57 @@ const [params, setParams] = useState<GeneratorParams>(() => {
             <span>{params.saturation.toFixed(2)}</span>
           </label>
           <input type="range" min="0.0" max="3.0" step="0.05" value={params.saturation} onChange={e => setParams({...params, saturation: parseFloat(e.target.value)})} style={{width:'100%'}}/>
+        </div>
+
+        <hr style={{ borderColor: '#333', margin: '10px 0' }} />
+        <div style={{ fontSize: '13px', fontWeight: 'bold' }}>Rendering</div>
+
+        <div>
+          <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
+            <span>Base Blur</span>
+            <span>{(params.baseBlur ?? 0).toFixed(2)}</span>
+          </label>
+          <input type="range" min="0.0" max="20.0" step="0.1" value={params.baseBlur ?? 0} onChange={e => setParams({...params, baseBlur: parseFloat(e.target.value)})} style={{width:'100%'}}/>
+        </div>
+
+        <div>
+          <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
+            <span>Base Opacity</span>
+            <span>{(params.baseOpacity ?? 1).toFixed(2)}</span>
+          </label>
+          <input type="range" min="0.0" max="2.0" step="0.05" value={params.baseOpacity ?? 1} onChange={e => setParams({...params, baseOpacity: parseFloat(e.target.value)})} style={{width:'100%'}}/>
+        </div>
+
+        <div>
+          <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
+            <span>Glow 1 Blur</span>
+            <span>{(params.glow1Blur ?? 4).toFixed(2)}</span>
+          </label>
+          <input type="range" min="0.0" max="40.0" step="0.5" value={params.glow1Blur ?? 4} onChange={e => setParams({...params, glow1Blur: parseFloat(e.target.value)})} style={{width:'100%'}}/>
+        </div>
+
+        <div>
+          <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
+            <span>Glow 1 Opacity</span>
+            <span>{(params.glow1Opacity ?? 0.6).toFixed(2)}</span>
+          </label>
+          <input type="range" min="0.0" max="2.0" step="0.05" value={params.glow1Opacity ?? 0.6} onChange={e => setParams({...params, glow1Opacity: parseFloat(e.target.value)})} style={{width:'100%'}}/>
+        </div>
+
+        <div>
+          <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
+            <span>Glow 2 Blur</span>
+            <span>{(params.glow2Blur ?? 12).toFixed(2)}</span>
+          </label>
+          <input type="range" min="0.0" max="80.0" step="0.5" value={params.glow2Blur ?? 12} onChange={e => setParams({...params, glow2Blur: parseFloat(e.target.value)})} style={{width:'100%'}}/>
+        </div>
+
+        <div>
+          <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
+            <span>Glow 2 Opacity</span>
+            <span>{(params.glow2Opacity ?? 0.3).toFixed(2)}</span>
+          </label>
+          <input type="range" min="0.0" max="2.0" step="0.05" value={params.glow2Opacity ?? 0.3} onChange={e => setParams({...params, glow2Opacity: parseFloat(e.target.value)})} style={{width:'100%'}}/>
         </div>
 
         <hr style={{ borderColor: '#333', margin: '10px 0' }} />

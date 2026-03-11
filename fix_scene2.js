@@ -4,6 +4,7 @@ let code = fs.readFileSync('src/Scene3D.tsx', 'utf-8');
 
 // 1. Add flipX to Particle Type
 code = code.replace(/sizeMultiplier\?: number;/g, 'sizeMultiplier?: number;\n        flipX?: boolean;');
+code = code.replace(/size: number;\n}/g, 'size: number;\n    flipX?: boolean;\n}');
 
 // 2. Add flipX to setParticleSize
 const setSizeOld = "const setParticleSize = (mesh: THREE.Points | THREE.Sprite, size: number) => {";
@@ -27,9 +28,6 @@ const propertiesOld = "sizeOverLife: emitterProps.particleSizeOverLife ?? 'none'
 const propertiesNew = "sizeOverLife: emitterProps.particleSizeOverLife ?? 'none',\n                    flipX,";
 code = code.replace(propertiesOld, propertiesNew);
 
-const createMeshOld = "const particleMesh = createParticleMesh(";
-const createMeshNew = "const particleMesh = createParticleMesh(";
-// We need to inject flipX to setParticleSize(particleMesh, previewedSize); wait, where is setParticleSize called in spawn?
 const setSizeSpawnOld = "setParticleSize(particleMesh, previewedSize);";
 const setSizeSpawnNew = "setParticleSize(particleMesh, previewedSize, flipX);";
 code = code.replace(setSizeSpawnOld, setSizeSpawnNew);
@@ -41,18 +39,12 @@ code = code.replace(/setParticleSize\(particle\.mesh, baseSize \* \(1 - progress
 code = code.replace(/setParticleSize\(particle\.mesh, baseSize \* \(0\.5 \+ progress \* 0\.5\)\);/g, "setParticleSize(particle.mesh, baseSize * (0.5 + progress * 0.5), particle.flipX);");
 code = code.replace(/setParticleSize\(particle\.mesh, baseSize\);/g, "setParticleSize(particle.mesh, baseSize, particle.flipX);");
 
-// 5. Update the replacementMesh logic that I just added manually
-const replacementOld = \scene.remove(particle.mesh);
-                    scene.add(replacementMesh);
-                    particle.mesh = replacementMesh;
-                  }\;
-const replacementNew = \scene.remove(particle.mesh);
-                    scene.add(replacementMesh);
-                    particle.mesh = replacementMesh;
-                    setParticleSize(particle.mesh, getPreviewedParticleSize(particle.baseSize ?? 3), particle.flipX);
-                  }\;
-// wait, we already added setParticleSize in fix_flip3! It might be there with wrong signature!
-// If it is there, we don't need to replace.
+// 5. check for particle.mesh = replacementMesh; and fix it correctly
+const repRegex = /particle\.mesh = replacementMesh;\s+setParticleSize\(particle\.mesh, getPreviewedParticleSize\(particle\.baseSize \?\? 3\), particle\.flipX\);\s+\}/g;
+if (!repRegex.test(code)) {
+    code = code.replace(/particle\.mesh = replacementMesh;\s*\}/g, "particle.mesh = replacementMesh;\n                    setParticleSize(particle.mesh, getPreviewedParticleSize(particle.baseSize ?? 3), particle.flipX);\n                  }");
+}
 
+// Write file
 fs.writeFileSync('src/Scene3D.tsx', code);
 console.log('Scene3D fixed.');

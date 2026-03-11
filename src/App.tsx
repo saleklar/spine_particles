@@ -21,6 +21,7 @@ type SceneSettings = {
   particleSequenceBudget: number;
   particleSequenceBudgetLoop: boolean;
   exportProjectionMode: 'orthographic' | 'perspective';
+  exportFireBlendMode?: boolean;
   cameraOrbitSpeed?: number;
 };
 
@@ -94,6 +95,7 @@ export type EmitterObject = SceneObject & {
     particleRotationVariation: number;
     particleRotationSpeed: number;
     particleRotationSpeedVariation: number;
+  particleHorizontalFlipChance?: number;
   particleStretch?: boolean;
   particleStretchAmount?: number;
     particleSpriteImageDataUrl?: string;
@@ -143,6 +145,7 @@ const DEFAULT_SCENE_SETTINGS: SceneSettings = {
   particleSequenceBudget: 30,
   particleSequenceBudgetLoop: true,
   exportProjectionMode: 'orthographic',
+  exportFireBlendMode: true,
   cameraOrbitSpeed: 0,
 };
 
@@ -699,6 +702,7 @@ export function App() {
       particleRotationVariation: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleRotationVariation ?? 0),
       particleRotationSpeed: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleRotationSpeed ?? 0),
       particleRotationSpeedVariation: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleRotationSpeedVariation ?? 0),
+      particleHorizontalFlipChance: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleHorizontalFlipChance ?? 0),
       particleStretch: Boolean((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleStretch ?? false),
       particleStretchAmount: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleStretchAmount ?? 0.05),
       particleSpriteImageDataUrl: String((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleSpriteImageDataUrl ?? ''),
@@ -1115,6 +1119,10 @@ export function App() {
     setSceneObjects((prev) => [...prev, newObject]);
     setShowCreateMenu(false);
   }, [createEmitterShapeNode]);
+
+    const [customPresets, setCustomPresets] = useState<Record<string, Record<string, any>>>(() => { try { const saved = localStorage.getItem('customEmitterPresets'); return saved ? JSON.parse(saved) : {}; } catch (e) { return {}; } });
+  const handleSaveCustomPreset = useCallback(() => { const selectedObj = sceneObjects.find(obj => obj.id === selectedObjectId); if (!selectedObj || selectedObj.type !== 'Emitter') { alert('Please select an Emitter object to save its preset.'); return; } const presetName = prompt('Enter a name for the custom emitter preset (must be unique):'); if (!presetName || presetName.trim() === '') return; const savedProps = JSON.parse(JSON.stringify(selectedObj.properties)); setCustomPresets(prev => { const next = { ...prev, [presetName.trim()]: savedProps }; localStorage.setItem('customEmitterPresets', JSON.stringify(next)); return next; }); alert('Preset saved!'); }, [sceneObjects, selectedObjectId]);
+  const handleLoadCustomPreset = useCallback((presetName: string) => { const props = customPresets[presetName]; if (!props) return; const newEmitter: SceneObject = { id: 'emitter_' + Date.now(), name: presetName, type: 'Emitter', position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 }, parentId: null, properties: JSON.parse(JSON.stringify(props)) }; const emitterShapeNode = createEmitterShapeNode(newEmitter.id, newEmitter); setSceneObjects((prev) => [...prev, newEmitter, emitterShapeNode]); setSelectedObjectId(newEmitter.id); }, [customPresets, createEmitterShapeNode]);
 
   const handleCreateFirePreset = useCallback(async (presetType: 'campfire' | 'torch') => {
     let dataUrls: string[] = [];
@@ -2254,9 +2262,18 @@ export function App() {
                 }}
                 type="button"
               >
-                <span>Torch</span>
-              </button>
-            </div>
+                <span>Torch</span></button>
+<div style={{ height: '1px', background: '#444', margin: '4px 0' }} />
+<button className="menu-option" onClick={() => { handleSaveCustomPreset(); setShowPresetsMenu(false); }} type="button">
+<span style={{ color: '#4cc9f0' }}>+ Save Selected Emitter</span>
+</button>
+{Object.keys(customPresets).map((presetName) => (
+<button key={presetName} className="menu-option" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }} onClick={() => { handleLoadCustomPreset(presetName); setShowPresetsMenu(false); }} type="button" title="Load Preset">
+<span>{presetName}</span>
+<span style={{ color: '#e76f51', marginLeft: '10px', fontSize: '0.8em', padding: '2px 6px', borderRadius: '4px', background: 'rgba(231, 111, 81, 0.1)' }} onClick={(e) => { e.stopPropagation(); if (confirm('Delete reset: ' + presetName + '?')) { setCustomPresets(prev => { const next = { ...prev }; delete next[presetName]; localStorage.setItem('customEmitterPresets', JSON.stringify(next)); return next; }); } }} title="Delete Preset">✕</span>
+</button>
+))}
+</div>
           )}
         </div>
 
@@ -2649,6 +2666,18 @@ export function App() {
                     <option value="perspective">Perspective (Camera View)</option>
                   </select>
                   
+                  <label className="settings-label" style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '8px' }} title="Whether to apply additive/screen blend modes to fire/glow particles in the Spine export">
+                    <input
+                      type="checkbox"
+                      checked={sceneSettings.exportFireBlendMode ?? true}
+                      onChange={(e) => setSceneSettings((prev) => ({
+                        ...prev,
+                        exportFireBlendMode: e.target.checked
+                      }))}
+                    />
+                    Export Blend Modes to Spine
+                  </label>
+
                   {sceneSettings.exportProjectionMode === 'perspective' && (
                     <>
                       <label className="settings-label" style={{ marginTop: '10px' }} title="Orbit speed of camera around origin during animation (degrees/sec)">
@@ -3993,6 +4022,19 @@ export function App() {
                           step={0.05}
                           type="range"
                           value={selectedEmitterProperties.particleRotationSpeedVariation}
+                        />
+
+                        <label htmlFor="particle-horizontal-flip-chance">
+                          Horizontal Flip Chance: {(selectedEmitterProperties.particleHorizontalFlipChance ?? 0) * 100}%
+                        </label>
+                        <input
+                          id="particle-horizontal-flip-chance"
+                          max={1}
+                          min={0}
+                          onChange={(event) => handleUpdateEmitterProperty('particleHorizontalFlipChance', Number.parseFloat(event.target.value))}
+                          step={0.05}
+                          type="range"
+                          value={selectedEmitterProperties.particleHorizontalFlipChance ?? 0}
                         />
 
                         <hr style={{ margin: '0.5rem 0', borderColor: '#3b455c' }} />

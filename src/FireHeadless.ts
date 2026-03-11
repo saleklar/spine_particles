@@ -18,7 +18,8 @@ export const defaultTorchParams: GeneratorParams = {
   resolution: 128,
   noiseType: 'voronoi',
   distortion: 0.8,
-  detail: 1.0, alphaThreshold: 0.0, flowX: 0, flowY: 1, flowZ: 0, rotX: 0, rotY: 0, rotZ: 0
+  detail: 1.0, alphaThreshold: 0.0, flowX: 0, flowY: 1, flowZ: 0, rotX: 0, rotY: 0, rotZ: 0,
+  baseBlur: 0.0, baseOpacity: 1.0, glow1Blur: 4.0, glow1Opacity: 0.6, glow2Blur: 12.0, glow2Opacity: 0.3
 };
 
 export const defaultCampfireParams: GeneratorParams = {
@@ -38,7 +39,8 @@ export const defaultCampfireParams: GeneratorParams = {
   resolution: 128,
   noiseType: 'voronoi',
   distortion: 0.5,
-  detail: 1.0, alphaThreshold: 0.0, flowX: 0, flowY: 1, flowZ: 0, rotX: 0, rotY: 0, rotZ: 0
+  detail: 1.0, alphaThreshold: 0.0, flowX: 0, flowY: 1, flowZ: 0, rotX: 0, rotY: 0, rotZ: 0,
+  baseBlur: 0.0, baseOpacity: 1.0, glow1Blur: 4.0, glow1Opacity: 0.6, glow2Blur: 12.0, glow2Opacity: 0.3
 };
 
 export const generateFireSequenceHeadless = async (params: GeneratorParams): Promise<string[]> => {

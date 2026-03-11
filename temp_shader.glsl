@@ -1,8 +1,8 @@
-
-  uniform float loopProgress;
-  uniform float speed;
-  uniform float scale;
-  uniform float coreBottom;
+export const fragmentShader = `
+uniform float loopProgress;
+uniform float speed;
+uniform float scale;
+uniform float coreBottom;
 uniform float coreTop;
 uniform float shapeType;
 uniform float brightness;
@@ -17,10 +17,12 @@ uniform float detail;
 uniform float alphaThreshold;
 uniform vec3 flowDirection;
 uniform vec3 rotation;
-  uniform vec3 rotationSpeed;
+uniform float evolveOverLife;
+uniform vec3 rotationSpeed;
+uniform float thermalBuoyancy;
+uniform float vorticityConfinement;
 
 varying vec2 vUv;
-
 
 mat3 getRotationMatrix(vec3 rot) {
     float cx = cos(rot.x), sx = sin(rot.x);
@@ -97,153 +99,216 @@ float snoise3(vec3 v) {
   return 105.0 * dot( m*m, vec4( dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3) ) );
 }
 
-float fbm(vec3 p) {
-    float f = 0.0;
-    float w = 0.5;
-    for(int i=0; i<4; i++) {
-        f += w * snoise3(p);
-        p *= 2.0;
-        w *= 0.5;
-    }
-    return f;
+
+float hash(vec3 p) {
+    p = fract(p * vec3(12.9898, 78.233, 151.7182));
+    p += dot(p, p.yzx + 33.33);
+    return fract((p.x + p.y) * p.z);
 }
 
-float getDensity(vec3 p, float t) {
+vec3 hash3(vec3 p) {
+    vec3 q = vec3(dot(p, vec3(127.1, 311.7, 74.7)), dot(p, vec3(269.5, 183.3, 246.1)), dot(p, vec3(113.5, 271.9, 124.6)));
+    return fract(sin(q) * 43758.5453) * 2.0 - 1.0;
+}
+
+float vnoise3(vec3 x) {
+    vec3 p = floor(x);
+    vec3 f = fract(x);
+    f = f*f*(3.0-2.0*f);
+
+    return mix(mix(mix(hash(p+vec3(0.0, 0.0, 0.0)), hash(p+vec3(1.0, 0.0, 0.0)), f.x),
+                   mix(hash(p+vec3(0.0, 1.0, 0.0)), hash(p+vec3(1.0, 1.0, 0.0)), f.x), f.y),
+               mix(mix(hash(p+vec3(0.0, 0.0, 1.0)), hash(p+vec3(1.0, 0.0, 1.0)), f.x),
+                   mix(hash(p+vec3(0.0, 1.0, 1.0)), hash(p+vec3(1.0, 1.0, 1.0)), f.x), f.y), f.z) * 2.0 - 1.0;
+}
+
+float voronoi3(vec3 x) {
+    vec3 p = floor(x);
+    vec3 f = fract(x);
+    float res = 100.0;
+    for(int k=-1; k<=1; k++) {
+        for(int j=-1; j<=1; j++) {
+            for(int i=-1; i<=1; i++) {
+                vec3 b = vec3(float(i), float(j), float(k));
+                vec3 r = vec3(b) - f + hash3(p + b);
+                float d = dot(r, r);
+                res = min(res, d);
+            }
+        }
+    }
+    return sqrt(res) * 2.0 - 1.0;
+}
+
+float getNoiseVal(vec3 x) {
+    if (noiseType > 2.5) {
+        return vnoise3(x);
+    } else if (noiseType > 1.5) {
+        return voronoi3(x*1.5);
+    } else if (noiseType > 0.5) {
+        return abs(snoise3(x)) * 2.0 - 1.0;
+    } else {
+        return snoise3(x);
+    }
+}
+
+float fbm(vec3 x) {
+      float v = 0.0;
+      float a = 0.5;
+      vec3 shift = vec3(100.0);
+      for (int i = 0; i < 4; ++i) {
+          v += a * getNoiseVal(x);
+          x = x * 2.0 + shift;
+          a *= 0.5;
+      }
+      return v;
+  }
+
+  float getDensity(vec3 p, float t) {
     vec3 np = p * scale * 0.5;
-    np -= flowDirection * t * 1.5;
+    // FDS Thermodynamics Approximation: Buoyancy causes vertical velocity to increase with height (temperature gradient)
+    vec3 advection = flowDirection * t * 1.5;
+    advection.y += (p.y + 1.0) * thermalBuoyancy * t * 2.0;
+    np -= advection;
     np = getRotationMatrix(rotation + rotationSpeed * t) * np;
 
-    
     np.x += snoise3(np * 2.0 + vec3(0.0, -t, 0.0)) * distortion * 0.5;
     np.z += snoise3(np * 2.0 + vec3(0.0, -t, t)) * distortion * 0.5;
-    
+
     float n = fbm(np);
-float mask = 0.0;
-    
-    
-    
-    
-    if (shapeType > 1.5) { // wisp
-        // extremely thin, wispy shape
+    float mask = 0.0;
+
+    if (shapeType > 1.5) {
         float r = length(p.xz);
-        float ny = p.y; // -1 to 1
-        
-        // domain warp for extra stringy details
+        float ny = p.y;
         vec3 warp = vec3(fbm(np * 2.0 + t), fbm(np * 2.5 - t), fbm(np * 2.0));
         np += warp * (detail * 0.4);
         n = fbm(np);
-        
-        float taper = smoothstep(1.0, 0.2, abs(ny)); // tapers at ends
-        float width = 0.3 * taper;
-vec3 shapeDist = p;
-          shapeDist.x += snoise3(vec3(p.y * 3.0, t * 2.0, 0.0)) * distortion * 0.2;
-          shapeDist.z += snoise3(vec3(0.0, t * 2.0, p.y * 3.0)) * distortion * 0.2;
-          float distFromCenter = abs(shapeDist.x) + abs(shapeDist.z)*0.5; // flatten it a bit
-        
+        float taper = smoothstep(1.0, 0.2, abs(ny));
+        float width = 0.6 * taper;
+        vec3 shapeDist = p;
+        shapeDist.x += snoise3(vec3(p.y * 3.0, t * 2.0, 0.0)) * distortion * 0.2;
+        shapeDist.z += snoise3(vec3(0.0, t * 2.0, p.y * 3.0)) * distortion * 0.2;
+        float distFromCenter = abs(shapeDist.x) + abs(shapeDist.z)*0.5;
         mask = 1.0 - smoothstep(width * 0.05, width + 0.2, distFromCenter);
         mask *= taper;
-
-    } else if (shapeType > 0.5) { // fireball
+    } else if (shapeType > 0.5) {
         float d = length(p);
-        mask = 1.0 - smoothstep(0.2, 0.6, d);
-    } else { // ground
+        mask = 1.0 - smoothstep(0.4, 0.9, d);
+    } else {
         float r = length(p.xz);
-        // Map y from [-1, 1] to [0, 1]
-        float ny = (p.y + 0.8) * 0.6;
+        float ny = (p.y + 0.9) * 0.52;
         float powY = pow(max(0.0, ny), 1.2);
-        float width = mix(0.4, 0.02, powY);
-        mask = 1.0 - smoothstep(width * 0.2, width, r);
-        float topFade = 1.0 - smoothstep(0.5, 1.0, ny);
+        float width = mix(0.7, 0.05, powY);
+        mask = 1.0 - smoothstep(width * 0.1, width, r);
+        float topFade = 1.0 - smoothstep(0.55, 1.0, ny);
         float bottomPinch = smoothstep(0.0, 0.2, ny);
-          mask *= topFade * mix(0.2, 1.0, bottomPinch);
-      }
+        mask *= topFade * mix(0.4, 1.0, bottomPinch);
+    }
 
-      // Add a bottom fade to all
-      mask *= smoothstep(-1.0, -0.6, p.y);
+    mask *= smoothstep(-1.0, -0.7, p.y);
 
-      float density = (n * 0.5 + 0.5) * mask;
+    float density = (n * 0.5 + 0.5) * mask;
     return pow(max(0.0, density), mix(coreBottom, coreTop, p.y * 0.5 + 0.5));
 }
 
 vec4 computeVolumetric(float timePhase) {
     float t = timePhase * speed * 2.0;
-    
     vec2 uv = (vUv - 0.5) * 2.0;
-    
-    // Shoot ray inward
+
     vec3 rayOrigin = vec3(uv.x, uv.y, 1.0);
     vec3 rayDir = vec3(0.0, 0.0, -1.0);
-    
+
     float tStep = 0.04;
     float tMax = 2.0;
     float currentT = 0.0;
-    
-    float T = 1.0; 
+
+    float T = 1.0;
     vec3 finalColor = vec3(0.0);
-    
+
     for(int i=0; i < 50; i++) {
         vec3 p = rayOrigin + rayDir * currentT;
-        
+
         if (abs(p.x) > 1.0 || abs(p.y) > 1.0 || abs(p.z) > 1.0) {
             currentT += tStep;
             continue;
         }
-        
+
         float density = getDensity(p, t);
-        
+
         if(density > 0.01) {
             vec3 fireColor = mix(color1, color2, smoothstep(0.1, 0.5, density));
             fireColor = mix(fireColor, color3, smoothstep(0.5, 0.9, density));
-            
+
             float hot = pow(density, 6.0) * detail;
             fireColor += vec3(1.0, 0.8, 0.4) * hot;
-            
+
             float smokeMask = smoothstep(0.3, 0.0, density) * smoothstep(0.0, 1.0, p.y+0.5) * 0.5;
             fireColor = mix(fireColor, vec3(0.02), smokeMask);
-            
+
             float erosionNoise = snoise3(p * scale * 2.0 - vec3(0.0, t*1.5, 0.0));
-              if (noiseType > 0.5) erosionNoise = abs(erosionNoise); // pseudo-voronoi for crispness
-              float erosionThreshold = alphaThreshold * mix(1.0, erosionNoise * 0.5 + 0.5, clamp(distortion * 0.5, 0.0, 1.0));
-              
-              float stepAlpha = max(0.0, density - erosionThreshold) * mix(8.0, 30.0, clamp(alphaThreshold, 0.0, 1.0));
-              stepAlpha = pow(stepAlpha, mix(0.7, 1.5, clamp(alphaThreshold, 0.0, 1.0))); 
-            
+            if (noiseType > 0.5) erosionNoise = abs(erosionNoise);
+            float erosionThreshold = alphaThreshold * mix(1.0, erosionNoise * 0.5 + 0.5, clamp(distortion * 0.5, 0.0, 1.0));
+            float stepAlpha = max(0.0, density - erosionThreshold) * mix(8.0, 30.0, clamp(alphaThreshold, 0.0, 1.0));
+            stepAlpha = pow(stepAlpha, mix(0.7, 1.5, clamp(alphaThreshold, 0.0, 1.0)));
             finalColor += T * fireColor * stepAlpha * tStep;
-            T *= exp(-stepAlpha * tStep * mix(1.0, 8.0, smokeMask)); 
-            
-            if(T < 0.01) break; 
+            T *= exp(-stepAlpha * tStep * mix(1.0, 8.0, smokeMask));
+
+            if(T < 0.01) break;
         }
-        
+
         currentT += tStep;
         if(currentT > tMax) break;
     }
-    
+
     float alpha = 1.0 - T;
     return vec4(finalColor, alpha);
 }
 
 void main() {
-    float p1 = fract(loopProgress);
-    float p2 = fract(loopProgress + 0.5);
+    vec4 outColor;
+    float currentBrightness = brightness;
+    float currentContrast = contrast;
+    float currentAlphaThreshold = alphaThreshold;
 
-    vec4 v1 = computeVolumetric(p1);
-    vec4 v2 = computeVolumetric(p2);
+    if (evolveOverLife > 0.5) {
+        float lp = loopProgress;
+        currentBrightness = mix(brightness * 2.0, brightness * 0.1, lp);
+        currentContrast = mix(contrast * 1.5, contrast * 0.5, lp);
 
-    float w1 = sin(p1 * 3.14159265);
-    float w2 = sin(p2 * 3.14159265);
-    float w1_sq = w1 * w1;
-    float w2_sq = w2 * w2;
+        if (distortion < 0.1) {
+             currentAlphaThreshold = mix(alphaThreshold, alphaThreshold + 0.1, lp);
+        } else {
+             currentAlphaThreshold = mix(alphaThreshold - 0.1, alphaThreshold + 0.6, pow(lp, 1.5));
+        }
+        outColor = computeVolumetric(lp);
+    } else {
+        float p1 = fract(loopProgress);
+        float p2 = fract(loopProgress + 0.5);
 
-    vec4 outColor = v1 * w1_sq + v2 * w2_sq;
-    
-    vec3 c = outColor.rgb * brightness;
-    c = (c - 0.5) * contrast + 0.5;
+        vec4 v1 = computeVolumetric(p1);
+        vec4 v2 = computeVolumetric(p2);
+
+        float w1 = sin(p1 * 3.14159265);
+        float w2 = sin(p2 * 3.14159265);
+        float w1_sq = w1 * w1;
+        float w2_sq = w2 * w2;
+
+        outColor = v1 * w1_sq + v2 * w2_sq;
+    }
+
+    vec3 c = outColor.rgb * currentBrightness;
+    c = (c - 0.5) * currentContrast + 0.5;
     float lum = dot(c, vec3(0.299, 0.587, 0.114));
     c = mix(vec3(lum), c, saturation);
-    
-    // Smooth opacity mapping
+
     float baseAlpha = pow(clamp(outColor.a, 0.0, 1.0), mix(0.7, 0.8, clamp(outColor.a, 0.0, 1.0)));
-    float a = baseAlpha * mix(1.5, 2.5, clamp(alphaThreshold, 0.0, 1.0));
-    
+    float a = baseAlpha * mix(1.5, 2.5, clamp(currentAlphaThreshold, 0.0, 1.0));
+
+    if (evolveOverLife > 0.5 && distortion < 0.1) {
+        a *= (1.0 - pow(loopProgress, 4.0));
+    }
+
     gl_FragColor = vec4(clamp(c, 0.0, 1.0), clamp(a, 0.0, 1.0));
 }
+`;
+

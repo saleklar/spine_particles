@@ -1,13 +1,28 @@
 const fs = require('fs');
-let c = fs.readFileSync('src/FireGenerator.tsx', 'utf8');
-let p1 = c.indexOf('float bottomPinch = smoothstep(0.0, 0.2, ny);');
-let p2 = c.indexOf('float density = (n * 0.5 + 0.5) * mask;', p1);
-if (p1 > -1 && p2 > -1) {
-    let replaced = 'float bottomPinch = smoothstep(0.0, 0.2, ny);\n          mask *= topFade * mix(0.2, 1.0, bottomPinch);\n      }\n\n      // Add a bottom fade to all\n      mask *= smoothstep(-1.0, -0.6, p.y);\n\n      ';
-    c = c.substring(0, p1) + replaced + c.substring(p2);
-    fs.writeFileSync('src/FireGenerator.tsx', c);
-    console.log('Success');
-} else {
-    console.log('Fail', p1, p2);
+let code = fs.readFileSync('src/App.tsx', 'utf-8');
+
+const str = "  const [customPresets, setCustomPresets] = useState<Record<string, Record<string, any>>>(() => { try { const saved = localStorage.getItem('customEmitterPresets'); return saved ? JSON.parse(saved) : {}; } catch (e) { return {}; } });\n" +
+"  const handleSaveCustomPreset = useCallback(() => { const selectedObj = sceneObjects.find(obj => obj.id === selectedObjectId); if (!selectedObj || selectedObj.type !== 'Emitter') { alert('Please select an Emitter object to save its preset.'); return; } const presetName = prompt('Enter a name for the custom emitter preset (must be unique):'); if (!presetName || presetName.trim() === '') return; const savedProps = JSON.parse(JSON.stringify(selectedObj.properties)); setCustomPresets(prev => { const next = { ...prev, [presetName.trim()]: savedProps }; localStorage.setItem('customEmitterPresets', JSON.stringify(next)); return next; }); alert('Preset saved!'); }, [sceneObjects, selectedObjectId]);\n" +
+"  const handleLoadCustomPreset = useCallback((presetName: string) => { const props = customPresets[presetName]; if (!props) return; const newEmitter: SceneObject = { id: 'emitter_' + Date.now(), name: presetName, type: 'Emitter', position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 }, parentId: null, properties: JSON.parse(JSON.stringify(props)) }; const emitterShapeNode = createEmitterShapeNode(newEmitter.id, newEmitter); setSceneObjects((prev) => [...prev, newEmitter, emitterShapeNode]); setSelectedObjectId(newEmitter.id); }, [customPresets, createEmitterShapeNode]);\n";
+
+const searchStr = "const handleCreateFirePreset = useCallback(async (presetType: 'campfire' | 'torch') => {";
+if (!code.includes('handleSaveCustomPreset')) {
+    code = code.replace(searchStr, str + "\n  " + searchStr);
 }
 
+const uiOld = /<span>Torch<\/span>\s*<\/button>\s*<\/div>/;
+const uiNew = "<span>Torch</span></button>\n" +
+"<div style={{ height: '1px', background: '#444', margin: '4px 0' }} />\n" +
+"<button className=\"menu-option\" onClick={() => { handleSaveCustomPreset(); setShowPresetsMenu(false); }} type=\"button\">\n" +
+"<span style={{ color: '#4cc9f0' }}>+ Save Selected Emitter</span>\n" +
+"</button>\n" +
+"{Object.keys(customPresets).map((presetName) => (\n" +
+"<button key={presetName} className=\"menu-option\" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }} onClick={() => { handleLoadCustomPreset(presetName); setShowPresetsMenu(false); }} type=\"button\" title=\"Load Preset\">\n" +
+"<span>{presetName}</span>\n" +
+"<span style={{ color: '#e76f51', marginLeft: '10px', fontSize: '0.8em', padding: '2px 6px', borderRadius: '4px', background: 'rgba(231, 111, 81, 0.1)' }} onClick={(e) => { e.stopPropagation(); if (confirm('Delete reset: ' + presetName + '?')) { setCustomPresets(prev => { const next = { ...prev }; delete next[presetName]; localStorage.setItem('customEmitterPresets', JSON.stringify(next)); return next; }); } }} title=\"Delete Preset\">✕</span>\n" +
+"</button>\n" +
+"))}\n" +
+"</div>";
+
+code = code.replace(uiOld, uiNew);
+fs.writeFileSync('src/App.tsx', code);
