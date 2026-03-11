@@ -84,7 +84,7 @@ uniform float vorticityConfinement;
 uniform bool useBlackbody;
 uniform float baseTemperature;
 uniform float peakTemperature;
-
+uniform float globalWarpAmount;
 varying vec2 vUv;
 
 mat3 getRotationMatrix(vec3 rot) {
@@ -663,7 +663,8 @@ const [params, setParams] = useState<GeneratorParams>(() => {
           vorticityConfinement: { value: params.vorticityConfinement !== undefined ? params.vorticityConfinement : 1.0 },
           useBlackbody: { value: params.useBlackbody || false },
           baseTemperature: { value: params.baseTemperature || 800 },
-          peakTemperature: { value: params.peakTemperature || 3500 }
+          peakTemperature: { value: params.peakTemperature || 3500 },
+          globalWarpAmount: { value: params.globalWarpAmount || 0.0 }
         },
       transparent: true,
       blending: THREE.NormalBlending
@@ -761,6 +762,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
       if(materialRef.current.uniforms.useBlackbody) materialRef.current.uniforms.useBlackbody.value = params.useBlackbody || false;
       if(materialRef.current.uniforms.baseTemperature) materialRef.current.uniforms.baseTemperature.value = params.baseTemperature || 800;
       if(materialRef.current.uniforms.peakTemperature) materialRef.current.uniforms.peakTemperature.value = params.peakTemperature || 3500;
+      if(materialRef.current.uniforms.globalWarpAmount) materialRef.current.uniforms.globalWarpAmount.value = params.globalWarpAmount || 0.0;
 
         materialRef.current.uniforms.alphaThreshold.value = params.alphaThreshold || 0.0;
         if (materialRef.current.uniforms.flowDirection) {
