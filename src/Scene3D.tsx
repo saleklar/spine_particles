@@ -80,6 +80,7 @@ type SceneSettings = {
   particlePreviewMode: 'real' | 'white-dots';
   particlePreviewSize: number;
   particleBudget: number;
+  adaptiveEmission?: boolean;
   particleSequenceBudget?: number;
   particleSequenceBudgetLoop?: boolean;
   exportProjectionMode?: 'orthographic' | 'perspective';
@@ -116,6 +117,7 @@ type Scene3DProps = {
   onCacheFrameCountChange?: (count: number) => void;
   cacheResetToken?: number;
   onUpdateSceneSettings?: (settings: Partial<SceneSettings>) => void;
+  onCameraChange?: (cameraState: { position: THREE.Vector3, quaternion: THREE.Quaternion }) => void;
 };
 
 type CachedParticleState = {
@@ -186,7 +188,7 @@ function evaluateCurve(curveJson: string | undefined, progress: number, defaultV
   return defaultValue;
 }
 
-export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneSettings, snapSettings, viewMode, onViewModeChange, sceneObjects, currentFrame, isPlaying, isCaching, physicsForces, selectedObjectId, selectedForceId, onObjectSelect, onForceSelect, onObjectTransform, onForceTransform, handleScale = 1.0, onCacheFrameCountChange, cacheResetToken = 0, onUpdateSceneSettings }, ref) => {
+export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneSettings, onCameraChange, snapSettings, viewMode, onViewModeChange, sceneObjects, currentFrame, isPlaying, isCaching, physicsForces, selectedObjectId, selectedForceId, onObjectSelect, onForceSelect, onObjectTransform, onForceTransform, handleScale = 1.0, onCacheFrameCountChange, cacheResetToken = 0, onUpdateSceneSettings }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -1245,6 +1247,13 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
       const activeCamera = currentCameraRef.current;
       if (!activeCamera) return;
 
+      if (onCameraChange && activeCamera) {
+        // Track changes\n        if (!(activeCamera as any)._lastQ) (activeCamera as any)._lastQ = new THREE.Quaternion();
+        if (!(activeCamera as any)._lastQ.equals(activeCamera.quaternion)) {
+          (activeCamera as any)._lastQ.copy(activeCamera.quaternion);
+          onCameraChange({ position: activeCamera.position.clone(), quaternion: activeCamera.quaternion.clone() });
+        }
+      }
       stats.update();
 
       const cameraState = cameraStateRef.current;
@@ -1746,7 +1755,14 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
               const emitterProps = (emitter.properties ?? {}) as Record<string, any>;
               const timeSinceLastEmit = now - particleSystem.lastEmit;
               const emissionRate = Number(emitterProps.emissionRate ?? 100);
-              const safeEmissionRate = Number.isFinite(emissionRate) && emissionRate > 0 ? emissionRate : 100;
+              const rawSafeEmissionRate = Number.isFinite(emissionRate) && emissionRate > 0 ? emissionRate : 100;
+              
+              const totalEmitters = Array.from(sceneObjectsRef.current.values()).filter(o => o.type === 'Emitter').length || 1;
+              const isAdaptive = sceneSettingsRef.current.adaptiveEmission !== false;
+              
+              const emitterLifetimeBase = Number(emitterProps.particleLifetime ?? 3);
+              const maxContinuousEmission = (particleBudget / totalEmitters) / Math.max(0.1, emitterLifetimeBase);
+              const safeEmissionRate = isAdaptive ? Math.min(rawSafeEmissionRate, maxContinuousEmission) : rawSafeEmissionRate;
               const emissionInterval = 1000 / safeEmissionRate;
               const inferEmitterTypeFromSource = (source: SceneObject): string => {
                 if (source.type === 'EmitterShape') {
@@ -2392,7 +2408,7 @@ export const Scene3D = forwardRef<Scene3DRef, Scene3DProps>(({ sceneSize, sceneS
                   }
 
                 if ((effectiveParticleType === 'sprites' || effectiveParticleType === '3d-model')) {
-                  let spriteTexture = resolveSpriteTexture(particle.spriteImageDataUrl ?? '', particle.spriteSequenceDataUrls ?? [], particle.age, currentEmitterFps, String(emitterProps.particleSpriteSequenceMode ?? 'loop'), particle.lifetime, particle.trackId);
+                  let spriteTexture = resolveSpriteTexture(particle.spriteImageDataUrl ?? '', particle.spriteSequenceDataUrls ?? [], particle.age, currentEmitterFps, String(emitterProps.particleSpriteSequenceMode ?? 'loop'), particle.lifetime);
                   
                   if (particle.flipX && spriteTexture) {
                     let flipped = flippedTextureCache.get(spriteTexture);

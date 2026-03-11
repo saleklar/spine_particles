@@ -1,0 +1,1 @@
+const fs=require('fs'); let c=fs.readFileSync('src/FireGenerator.tsx','utf8'); c=c.replace(/onExport\(content, \ire_sequence.zip\\);/g, 'if (onExport) onExport(content, \ire_sequence.zip\);'); fs.writeFileSync('src/FireGenerator.tsx', c);

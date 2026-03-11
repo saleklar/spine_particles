@@ -56,19 +56,10 @@ export const generateFireSequenceHeadless = async (params: GeneratorParams): Pro
     renderer.setPixelRatio(1);
 
     const scene = new THREE.Scene();
-    
-    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
-    camera.position.set(0, 1.5, 6);
-    camera.lookAt(0, 0.5, 0);
-
+    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 10);
     camera.position.z = 1;
 
-    
-    const GRID_SIZE = params.domainResolution || 24;
-    const DOMAIN_SIZE = 4.8; // Keep overall fire volume constant
-    const SPACING = DOMAIN_SIZE / GRID_SIZE;
-    const geometry = new THREE.BoxGeometry(SPACING*0.9, SPACING*0.9, SPACING*0.9);
-
+    const geometry = new THREE.PlaneGeometry(2, 2);
     
     // Convert hex to THREE.Color
     const parseColor = (hex: string) => {
@@ -99,8 +90,6 @@ export const generateFireSequenceHeadless = async (params: GeneratorParams): Pro
         detail: { value: params.detail },
           
           alphaThreshold: { value: params.alphaThreshold || 0.0 },
-          emitterTurbulence: { value: params.emitterTurbulence ?? 0.5 },
-          emitterSpeed: { value: params.emitterSpeed ?? 1.0 },
           evolveOverLife: { value: params.evolveOverLife ? 1.0 : 0.0 },
           flowDirection: { value: new THREE.Vector3(params.flowX || 0, params.flowY || 1.0, params.flowZ || 0) },
           rotation: { value: new THREE.Vector3(params.rotX || 0, params.rotY || 0, params.rotZ || 0) },
@@ -110,34 +99,15 @@ export const generateFireSequenceHeadless = async (params: GeneratorParams): Pro
           useBlackbody: { value: params.useBlackbody || false },
           baseTemperature: { value: params.baseTemperature || 800 },
           peakTemperature: { value: params.peakTemperature || 3500 },
-          globalWarpAmount: { value: params.globalWarpAmount || 0.0 }
+          stretchX: { value: params.stretchX || 1.0 },
+          stretchY: { value: params.stretchY || 1.0 }
         },
       blending: THREE.NormalBlending,
       depthWrite: false,
     });
 
-    
-    material.transparent = true;
-    material.blending = THREE.AdditiveBlending;
-    material.depthWrite = false;
-    
-    const GRID_SIZE_Y = Math.floor(GRID_SIZE * 2.5);
-    const COUNT = GRID_SIZE * GRID_SIZE_Y * GRID_SIZE;
-    const mesh = new THREE.InstancedMesh(geometry, material, COUNT);
-    let idx = 0;
-    const dummy = new THREE.Object3D();
-    const offset = (GRID_SIZE / 2.0) * SPACING;
-    for (let x = 0; x < GRID_SIZE; x++) {
-        for (let y = 0; y < GRID_SIZE_Y; y++) {
-            for (let z = 0; z < GRID_SIZE; z++) {
-                dummy.position.set(x * SPACING - offset, y * SPACING - offset + 1.0, z * SPACING - offset);
-                dummy.updateMatrix();
-                mesh.setMatrixAt(idx++, dummy.matrix);
-            }
-        }
-    }
+    const mesh = new THREE.Mesh(geometry, material);
     scene.add(mesh);
-
 
     const dataUrls: string[] = [];
 

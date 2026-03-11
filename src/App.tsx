@@ -1,4 +1,5 @@
 import { generateFireSequenceHeadless, defaultTorchParams, defaultCampfireParams } from './FireHeadless';
+import * as THREE from 'three';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Scene3D, Scene3DRef } from './Scene3D';
 import { Animator3D } from './Animator3D';
@@ -18,6 +19,7 @@ type SceneSettings = {
   particlePreviewMode: 'real' | 'white-dots';
   particlePreviewSize: number;
   particleBudget: number;
+  adaptiveEmission?: boolean;
   particleSequenceBudget: number;
   particleSequenceBudgetLoop: boolean;
   exportProjectionMode: 'orthographic' | 'perspective';
@@ -95,6 +97,7 @@ export type EmitterObject = SceneObject & {
     particleRotationVariation: number;
     particleRotationSpeed: number;
     particleRotationSpeedVariation: number;
+    particleAlignToVelocity?: boolean;
   particleHorizontalFlipChance?: number;
   particlePivotX?: number;
   particlePivotY?: number;
@@ -144,6 +147,7 @@ const DEFAULT_SCENE_SETTINGS: SceneSettings = {
   particlePreviewMode: 'real',
   particlePreviewSize: 1.2,
   particleBudget: 500,
+  adaptiveEmission: true,
   particleSequenceBudget: 30,
   particleSequenceBudgetLoop: true,
   exportProjectionMode: 'orthographic',
@@ -229,6 +233,7 @@ export function App() {
   const [showCreateSubmenu, setShowCreateSubmenu] = useState<'3D' | '2D' | 'Presets' | null>(null);
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
   const [draftSize, setDraftSize] = useState<SceneSize>(DEFAULT_SCENE_SIZE);
+  const [particleCameraState, setParticleCameraState] = useState<{position: THREE.Vector3, quaternion: THREE.Quaternion} | null>(null);
   const scene3DRef = useRef<Scene3DRef>(null);
 
   const handleExportSpine = async () => {
@@ -704,6 +709,7 @@ export function App() {
       particleRotationVariation: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleRotationVariation ?? 0),
       particleRotationSpeed: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleRotationSpeed ?? 0),
       particleRotationSpeedVariation: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleRotationSpeedVariation ?? 0),
+      particleAlignToVelocity: Boolean((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleAlignToVelocity ?? false),
       particleHorizontalFlipChance: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particleHorizontalFlipChance ?? 0),
         particlePivotX: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particlePivotX ?? 0.5),
         particlePivotY: Number((selectedObject.properties as EmitterObject['properties'] | undefined)?.particlePivotY ?? 0.5),
@@ -1056,7 +1062,8 @@ export function App() {
       setSelectedObjectId(targetId);
     } else {
       const newObject: any = { id: `Emitter_${Date.now()}`, name: 'Animated Sprite Emitter', type: 'Emitter', position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 }, parentId: null };
-      newObject.properties = { emissionRate: 5, emitterType: 'point', emissionMode: 'volume', layerImageDataUrl: '', particleLifetime: 3, particleSpeed: 50, particleSpeedVariation: 0.2, particleSize: 5, particleSizeVariation: 0.2, particleColor: '#ffffff', particleColorVariation: 0.1, particleOpacity: 1, particleType: 'sprites', particleGlow: false, particleRotation: 0, particleRotationVariation: 0, particleRotationSpeed: 0, particleRotationSpeedVariation: 0, particleStretch: false, particleStretchAmount: 0.05, particleTextureUrl: '', particleTextureName: '', particleSpriteImageDataUrl: '', particleSpriteImageName: '', particleOpacityOverLifeCurve: '', particleRotationOverLife: false, particleRotationOverLifeCurve: '', particleSizeOverLifeCurve: '', particleOpacityOverLife: false, particleColorOverLife: false, particleColorOverLifeTarget: '#000000', particleSizeOverLife: 'none', particleSpriteSequenceDataUrls: dataUrls, particleSpriteSequenceFirstName: 'Rendered Animation', particleSpriteSequenceFps: 24, particleSpriteSequenceMode: 'loop'};
+      newObject.properties = { emissionRate: 5, emitterType: 'point', emissionMode: 'volume', layerImageDataUrl: '', particleLifetime: 3, particleSpeed: 50, particleSpeedVariation: 0.2, particleSize: 5, particleSizeVariation: 0.2, particleColor: '#ffffff', particleColorVariation: 0.1, particleOpacity: 1, particleType: 'sprites', particleGlow: false, particleRotation: 0, particleRotationVariation: 0, particleRotationSpeed: 0, particleRotationSpeedVariation: 0,
+      particleAlignToVelocity: false, particleStretch: false, particleStretchAmount: 0.05, particleTextureUrl: '', particleTextureName: '', particleSpriteImageDataUrl: '', particleSpriteImageName: '', particleOpacityOverLifeCurve: '', particleRotationOverLife: false, particleRotationOverLifeCurve: '', particleSizeOverLifeCurve: '', particleOpacityOverLife: false, particleColorOverLife: false, particleColorOverLifeTarget: '#000000', particleSizeOverLife: 'none', particleSpriteSequenceDataUrls: dataUrls, particleSpriteSequenceFirstName: 'Rendered Animation', particleSpriteSequenceFps: 24, particleSpriteSequenceMode: 'loop'};
       setSceneObjects(prev => [...prev, newObject]);
       setSelectedObjectId(newObject.id);
     }
@@ -3900,6 +3907,7 @@ export function App() {
     <h3 style={{ margin: '0', padding: '5px 10px', fontSize: '12px', background: '#333', color: '#aaa', borderBottom: '1px solid #444', cursor: 'grab' }} >Live Volumetric Fire Settings</h3>
     <div style={{ padding: '10px' }}>
         <FireGenerator
+        particleCameraState={particleCameraState}
         embeddedUI={true}
         onExportToParticleSystem={(dataUrls, fps) => {
             const textureName = `fire_gen_${Date.now()}`;

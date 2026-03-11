@@ -1,6 +1,6 @@
 const fs = require('fs');
 
-const shader = `const fragmentShader = \`
+const shader = \const fragmentShader = \\\\\
 uniform float loopProgress;
 uniform float speed;
 uniform float scale;
@@ -91,9 +91,8 @@ void main() {
     float alpha = min(intensity * 1.5, 1.0);
     gl_FragColor = vec4(resultColor, alpha);
 }
-\`;
-
-`;
+\\\\\;
+\;
 
 let f1 = fs.readFileSync('src/FireGenerator.tsx', 'utf8');
 let pre1 = f1.substring(0, f1.indexOf('const fragmentShader ='));
@@ -105,4 +104,3 @@ let pre2 = f2.substring(0, f2.indexOf('const fragmentShader ='));
 let post2 = f2.substring(f2.indexOf('export async function generateFireSequenceHeadless'));
 fs.writeFileSync('src/FireHeadless.ts', pre2 + shader + post2);
 
-console.log("Patched successfully.");

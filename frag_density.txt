@@ -1,0 +1,49 @@
+float getDensity(vec3 p, float t) {
+    p.x /= stretchX;
+    p.y /= stretchY;
+    vec3 np = p * scale * 0.5;
+    // FDS Thermodynamics Approximation: Buoyancy causes vertical velocity to increase with height (temperature gradient)
+    vec3 advection = flowDirection * t * 0.5;
+    advection.y += (p.y + 1.0) * thermalBuoyancy * t * 0.5;
+    np -= advection;
+    np = getRotationMatrix(rotation + rotationSpeed * t) * np;
+
+    np.x += snoise3(np * 2.0 + vec3(0.0, -t, 0.0)) * distortion * 0.5;
+    np.z += snoise3(np * 2.0 + vec3(0.0, -t, t)) * distortion * 0.5;
+
+    float n = fbm(np);
+    float mask = 0.0;
+
+    if (shapeType > 1.5) {
+        float r = length(p.xz);
+        float ny = p.y;
+        vec3 warp = vec3(fbm(np * 2.0 + t), fbm(np * 2.5 - t), fbm(np * 2.0));
+        np += warp * (detail * 0.4);
+        n = fbm(np);
+        float taper = smoothstep(1.0, 0.2, abs(ny));
+        float width = 0.6 * taper;
+        vec3 shapeDist = p;
+        shapeDist.x += snoise3(vec3(p.y * 3.0, t * 0.5, 0.0)) * distortion * 0.2;
+        shapeDist.z += snoise3(vec3(0.0, t * 0.5, p.y * 3.0)) * distortion * 0.2;
+        float distFromCenter = abs(shapeDist.x) + abs(shapeDist.z)*0.5;
+        mask = 1.0 - smoothstep(width * 0.05, width + 0.2, distFromCenter);
+        mask *= taper;
+    } else if (shapeType > 0.5) {
+        float d = length(p);
+        mask = 1.0 - smoothstep(0.4, 0.9, d);
+    } else {
+        float r = length(p.xz);
+        float ny = (p.y + 0.9) * 0.52;
+        float powY = pow(max(0.0, ny), 1.2);
+        float width = mix(0.7, 0.05, powY);
+        mask = 1.0 - smoothstep(width * 0.1, width, r);
+        float topFade = 1.0 - smoothstep(0.55, 1.0, ny);
+        float bottomPinch = smoothstep(0.0, 0.2, ny);
+        mask *= topFade * mix(0.4, 1.0, bottomPinch);
+    }
+
+    mask *= smoothstep(-1.0, -0.7, p.y);
+
+    float density = (n * 0.5 + 0.5) * mask;
+    return pow(max(0.0, density), mix(coreBottom, coreTop, p.y * 0.5 + 0.5));
+}

@@ -1,6 +1,6 @@
 const fs = require('fs');
 
-const shader = `const fragmentShader = \`
+const shader = `export const fragmentShader = \`
 uniform float loopProgress;
 uniform float speed;
 uniform float scale;
@@ -95,13 +95,13 @@ void main() {
 
 `;
 
-let f1 = fs.readFileSync('src/FireGenerator.tsx', 'utf8');
-let pre1 = f1.substring(0, f1.indexOf('const fragmentShader ='));
+let f1 = fs.readFileSync('src/FireGenerator.tsx.bak', 'utf8');
+let pre1 = f1.substring(0, f1.indexOf('export const fragmentShader ='));
 let post1 = f1.substring(f1.indexOf('export const FireGenerator ='));
 fs.writeFileSync('src/FireGenerator.tsx', pre1 + shader + post1);
 
-let f2 = fs.readFileSync('src/FireHeadless.ts', 'utf8');
-let pre2 = f2.substring(0, f2.indexOf('const fragmentShader ='));
+let f2 = fs.readFileSync('src/FireHeadless.ts.bak', 'utf8');
+let pre2 = f2.substring(0, f2.indexOf('export const fragmentShader ='));
 let post2 = f2.substring(f2.indexOf('export async function generateFireSequenceHeadless'));
 fs.writeFileSync('src/FireHeadless.ts', pre2 + shader + post2);
 

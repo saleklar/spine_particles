@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import JSZip from 'jszip';
 
-export interface FireGeneratorProps { particleCameraState?: {position: THREE.Vector3, quaternion: THREE.Quaternion} | null;  onExport?: (blob: Blob, name: string)=>void; onExportToParticleSystem?: (urls: string[], fps: number)=>void; onAttachToEmitter?: (urls: string[])=>void; embeddedUI?: boolean; autoRenderOnChange?: boolean; }
+export interface FireGeneratorProps { onExport?: (blob: Blob, name: string)=>void; onExportToParticleSystem?: (urls: string[], fps: number)=>void; onAttachToEmitter?: (urls: string[])=>void; embeddedUI?: boolean; autoRenderOnChange?: boolean; }
 
 export interface GeneratorParams {
   stretchX?: number;
@@ -21,7 +21,7 @@ export interface GeneratorParams {
   saturation: number;
   frames: number;
   fps: number;
-  resolution: number; domainResolution?: number; emitterTurbulence?: number; emitterSpeed?: number;
+  resolution: number;
   noiseType: 'simplex' | 'voronoi' | 'cellular' | 'value';
   distortion: number;
   detail: number;
@@ -56,235 +56,307 @@ export interface GeneratorParams {
   }
 
   export const vertexShader = `
+  varying vec2 vUv;
+  void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+export const fragmentShader = `
 
 uniform float loopProgress;
 uniform float speed;
 uniform float scale;
-uniform float stretchX;
-uniform float stretchY;
+uniform float coreBottom;
+uniform float coreTop;
 uniform float shapeType;
-uniform vec3 flowDirection;
-uniform vec3 rotation;
-uniform vec3 rotationSpeed;
-uniform float thermalBuoyancy;
-uniform float distortion;
-uniform float detail;
-uniform bool useBlackbody;
-uniform float baseTemperature;
-uniform float peakTemperature;
+uniform float brightness;
+uniform float contrast;
+uniform float saturation;
 uniform vec3 color1;
 uniform vec3 color2;
 uniform vec3 color3;
+uniform float noiseType;
+uniform float distortion;
+uniform float detail;
 uniform float alphaThreshold;
-uniform float emitterTurbulence;
-uniform float emitterSpeed;
-
-varying vec3 vColor;
-varying float vAlpha;
+uniform vec3 flowDirection;
+uniform vec3 rotation;
+uniform float evolveOverLife;
+uniform vec3 rotationSpeed;
+uniform float thermalBuoyancy;
+uniform float vorticityConfinement;
+uniform bool useBlackbody;
+uniform float baseTemperature;
+uniform float peakTemperature;
+uniform float stretchX;
+uniform float stretchY;
+varying vec2 vUv;
 
 mat3 getRotationMatrix(vec3 rot) {
     float cx = cos(rot.x), sx = sin(rot.x);
     float cy = cos(rot.y), sy = sin(rot.y);
     float cz = cos(rot.z), sz = sin(rot.z);
-    mat3 rx = mat3(1.0, 0.0, 0.0, 0.0, cx, -sx, 0.0, sx, cx);
-    mat3 ry = mat3(cy, 0.0, sy, 0.0, 1.0, 0.0, -sy, 0.0, cy);
-    mat3 rz = mat3(cz, -sz, 0.0, sz, cz, 0.0, 0.0, 0.0, 1.0);
+
+    mat3 rx = mat3(
+        1.0, 0.0, 0.0,
+        0.0, cx, -sx,
+        0.0, sx, cx
+    );
+
+    mat3 ry = mat3(
+        cy, 0.0, sy,
+        0.0, 1.0, 0.0,
+        -sy, 0.0, cy
+    );
+
+    mat3 rz = mat3(
+        cz, -sz, 0.0,
+        sz, cz, 0.0,
+        0.0, 0.0, 1.0
+    );
+
     return rz * ry * rx;
 }
 
-float hash(float n) { return fract(sin(n) * 1e4); }
-float noise(vec3 x) {
-    const vec3 step = vec3(110.0, 241.0, 171.0);
-    vec3 i = floor(x);
-    vec3 f = fract(x);
-    float n = dot(i, step);
-    vec3 u = f * f * (3.0 - 2.0 * f);
-    return mix(mix(mix( hash(n + dot(step, vec3(0, 0, 0))), hash(n + dot(step, vec3(1, 0, 0))), u.x),
-                   mix( hash(n + dot(step, vec3(0, 1, 0))), hash(n + dot(step, vec3(1, 1, 0))), u.x), u.y),
-               mix(mix( hash(n + dot(step, vec3(0, 0, 1))), hash(n + dot(step, vec3(1, 0, 1))), u.x),
-                   mix( hash(n + dot(step, vec3(0, 1, 1))), hash(n + dot(step, vec3(1, 1, 1))), u.x), u.y), u.z);
-}
+// --- 3D Simplex Noise ---
+vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+vec4 permute(vec4 x) { return mod289(((x*34.0)+1.0)*x); }
+vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
 
-float fbm(vec3 p) {
-    float f = 0.0;
-    float amp = 0.5;
-    vec3 shift = vec3(100.0);
-    for(int i=0; i<4; i++) {
-        f += amp * noise(p);
-        p = p * 2.01 + shift;
-        amp *= 0.5;
-    }
-    return f;
-}
-
-float getDensity(vec3 p, float t) {
-    p.y += 0.8; 
-    float sx = stretchX > 0.01 ? stretchX : 1.0;
-    float sy = stretchY > 0.01 ? stretchY : 1.0;
-    p.x /= sx;
-    p.y /= sy;
-    p.z /= sx;
-    
-    // THERMAL BUOYANCY: Geometrically lift the central core higher
-    // Pull the sampling coordinate DOWN in the center so the physical shape goes UP
-    float centerProximity = smoothstep(1.5, 0.0, length(p.xz));
-    float lift = centerProximity * max(0.5, thermalBuoyancy * 2.5);
-    float liftedY = p.y - (lift * 1.5); 
-
-    // Convert to volume shape distance using lifted coordinate
-    // Cone tapers much slower in the center so it reaches high into the air
-    float coneTaper = mix(0.4, 0.15, centerProximity);
-    float radius = max(0.01, 1.2 - max(0.0, liftedY) * coneTaper);
-    float d = length(p.xz) - radius;
-
-    // Central parts also move upward significantly faster
-    float currentSpeed = speed * (1.0 + lift * 1.2) * 2.5;
-
-    // Use lifted coordinates for sampling noise so turbulence follows the flame up
-    vec3 np = vec3(p.x, liftedY, p.z) * scale * 0.5;
-    
-    // To make it seamlessly loop over t from 0.0 to 1.0
-    // We blend two noise offsets
-    // Pass 1: current time
-    float disp1 = t * currentSpeed;
-    vec3 np1 = np - vec3(0.0, disp1, 0.0);
-    float n1_1 = fbm(np1);
-    float n2_1 = fbm(np1 * 2.0 - vec3(0.0, disp1 * 2.0, 0.0));
-    float noise1 = n1_1 * 0.7 + n2_1 * 0.35;
-
-    // Pass 2: time wrapped to loop around
-    float disp2 = (t - 1.0) * currentSpeed;
-    vec3 np2 = np - vec3(0.0, disp2, 0.0);
-    float n1_2 = fbm(np2);
-    float n2_2 = fbm(np2 * 2.0 - vec3(0.0, disp2 * 2.0, 0.0));
-    float noise2 = n1_2 * 0.7 + n2_2 * 0.35;
-
-    // Blend them based on time to create a perfect loop
-    float noiseBlended = mix(noise1, noise2, t);
-
-    // Give it a more dynamic displacement using distortion
-    // Remap noise into negative/positive to push and pull bounds
-    float nSigned = (noiseBlended - 0.5) * 2.0;
-    d += nSigned * max(0.5, distortion) * smoothstep(0.0, 1.5, p.y + 0.5); // increased displacement
-
-    // DETACHED EMBERS: Pockets of fire breaking off near the top
-    float emberSpeed = currentSpeed * 1.5; 
-    float eDisp1 = t * emberSpeed;
-    float eDisp2 = (t - 1.0) * emberSpeed;
-    vec3 eNp1 = np * 3.5 - vec3(0.0, eDisp1, 0.0);
-    vec3 eNp2 = np * 3.5 - vec3(0.0, eDisp2, 0.0);
-    float eNoise = mix(fbm(eNp1), fbm(eNp2), t);
-    
-    // Threshold to create distinct small blobs
-    float emberMask = smoothstep(0.65, 0.85, eNoise);
-    emberMask *= smoothstep(0.5, 3.5, p.y) * smoothstep(2.0, 0.5, d);
-    d -= emberMask * 0.9;
-
-    // Ethereal thinning
-    // Thinner shell based on detail to make it wispy instead of blocky
-    // Default detail is ~1.0, so thickness will be ~0.25 (much thinner than 0.4)
-    float shellThickness = mix(0.35, 0.05, clamp(detail / 5.0, 0.0, 1.0)); 
-    float shell = 1.0 - smoothstep(0.0, shellThickness, abs(d));
-
-    // High frequency textural cutouts for a wispy, stringy look
-    vec3 hfNp1 = np * 2.5 - vec3(0.0, disp1 * 1.8, 0.0);
-    vec3 hfNp2 = np * 2.5 - vec3(0.0, disp2 * 1.8, 0.0);
-    float hfN = mix(fbm(hfNp1), fbm(hfNp2), t);
-    
-    // Create holes and wisps along the surface
-    shell *= smoothstep(0.1, 0.9, hfN + (detail * 0.15));
-
-    // A very faint core so the center is mostly empty and we see far-side details
-    float coreAmt = smoothstep(0.2, -0.4, d) * 0.02;  
-    float den = shell + coreAmt;
-
-    // Let the center and embers fade out much higher up!
-    float topFadeStart = mix(1.2, 4.0, centerProximity);
-    float topFadeEnd = mix(3.5, 6.5, centerProximity);
-
-    den *= smoothstep(-0.3, 0.5, p.y);
-    den *= smoothstep(topFadeEnd, topFadeStart, p.y);
-
-    float emDisp1 = t * emitterSpeed * 2.5;
-    float emDisp2 = (t - 1.0) * emitterSpeed * 2.5;
-
-    vec3 emNp1 = vec3(p.x * 2.0, p.z * 2.0, emDisp1);
-    vec3 emNp2 = vec3(p.x * 2.0, p.z * 2.0, emDisp2);      
-    float emN1 = fbm(emNp1);
-    float emN2 = fbm(emNp2);
-    float emN = mix(emN1, emN2, t);
-    
-    float emMask = mix(1.0, smoothstep(0.1, 0.9, emN), emitterTurbulence);
-    den *= mix(emMask, 1.0, smoothstep(-0.5, 1.5, p.y));
-
-    return den;
-}
-
-vec3 blackbody(float Temp) {
-    vec3 c = vec3(255.0);
-    c.x = 56100000. * pow(Temp,(-3.0 / 2.0)) + 148.0;
-    c.y = 100.04 * log(Temp) - 236.0;
-    if (Temp <= 6500.0) c.y = 99.47 * log(Temp) - 161.11;
-    if (Temp <= 1900.0) c.y = 50.0;
-    c.z = 194.18 * log(Temp) - 262.0;
-    if (Temp <= 1900.0) c.z = 0.0;
-    return clamp(c / 255.0, 0.0, 1.0);
-}
-
-void main() {
-    vec3 instancePos = (instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
-    float t = loopProgress;
-    float local_den = getDensity(instancePos, t);
-    
-    if (local_den < 0.05) {
-        gl_Position = vec4(2.0, 2.0, 2.0, 0.0);
-        return;
-    }
-    
-    float temp = mix(baseTemperature, peakTemperature, local_den);
-    if (useBlackbody) {
-        vColor = blackbody(temp) * local_den * 2.0;
+// --- Blackbody Radiation ---
+vec3 blackbody(float temp) {
+    vec3 color = vec3(0.0);
+    temp /= 100.0;
+    if (temp <= 66.0) {
+        color.r = 255.0;
+        color.g = 99.4708025861 * log(temp) - 161.1195681661;
+        if (temp <= 19.0) {
+            color.b = 0.0;
+        } else {
+            color.b = 138.5177312231 * log(temp - 10.0) - 305.0447927307;
+        }
     } else {
-        vec3 colMix = mix(color3, color2, smoothstep(0.0, 0.5, local_den));
-        vColor = mix(colMix, color1, smoothstep(0.5, 1.0, local_den)) * local_den * 2.0;
+        color.r = 329.698727446 * pow(temp - 60.0, -0.1332047592);
+        color.g = 288.1221695283 * pow(temp - 60.0, -0.0755148492);
+        color.b = 255.0;
     }
-    
-    vAlpha = smoothstep(alphaThreshold, alphaThreshold + 0.1, local_den);
-    if (vAlpha <= 0.0) {
-        gl_Position = vec4(2.0, 2.0, 2.0, 0.0);
-        return;
-    }
-    
-    vec3 scalePos = position * clamp(local_den * 1.5, 0.2, 1.0);
-    vec4 worldPos = modelMatrix * instanceMatrix * vec4(scalePos, 1.0);
-    gl_Position = projectionMatrix * viewMatrix * worldPos;
+    return clamp(color / 255.0, 0.0, 1.0);
 }
 
-`;
+float snoise3(vec3 v) {
+  const vec2  C = vec2(1.0/6.0, 1.0/3.0) ;
+  const vec4  D = vec4(0.0, 0.5, 1.0, 2.0);
+  vec3 i  = floor(v + dot(v, C.yyy) );
+  vec3 x0 = v - i + dot(i, C.xxx) ;
+  vec3 g = step(x0.yzx, x0.xyz);
+  vec3 l = 1.0 - g;
+  vec3 i1 = min( g.xyz, l.zxy );
+  vec3 i2 = max( g.xyz, l.zxy );
+  vec3 x1 = x0 - i1 + C.xxx;
+  vec3 x2 = x0 - i2 + C.yyy;
+  vec3 x3 = x0 - D.yyy;
+  i = mod289(i);
+  vec4 p = permute( permute( permute(
+             i.z + vec4(0.0, i1.z, i2.z, 1.0 ))
+           + i.y + vec4(0.0, i1.y, i2.y, 1.0 ))
+           + i.x + vec4(0.0, i1.x, i2.x, 1.0 ));
+  float n_ = 0.142857142857;
+  vec3  ns = n_ * D.wyz - D.xzx;
+  vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
+  vec4 x_ = floor(j * ns.z);
+  vec4 y_ = floor(j - 7.0 * x_ );
+  vec4 x = x_ *ns.x + ns.yyyy;
+  vec4 y = y_ *ns.x + ns.yyyy;
+  vec4 h = 1.0 - abs(x) - abs(y);
+  vec4 b0 = vec4( x.xy, y.xy );
+  vec4 b1 = vec4( x.zw, y.zw );
+  vec4 s0 = floor(b0)*2.0 + 1.0;
+  vec4 s1 = floor(b1)*2.0 + 1.0;
+  vec4 sh = -step(h, vec4(0.0));
+  vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy ;
+  vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww ;
+  vec3 p0 = vec3(a0.xy,h.x);
+  vec3 p1 = vec3(a0.zw,h.y);
+  vec3 p2 = vec3(a1.xy,h.z);
+  vec3 p3 = vec3(a1.zw,h.w);
+  vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2, p2), dot(p3,p3)));
+  p0 *= norm.x; p1 *= norm.y; p2 *= norm.z; p3 *= norm.w;
+  vec4 m = max(0.5 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
+  m = m * m;
+  return 105.0 * dot( m*m, vec4( dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3) ) );
+}
 
-export const fragmentShader = `
 
-uniform float brightness;
-uniform float contrast;
-uniform float saturation;
+float hash(vec3 p) {
+    p = fract(p * vec3(12.9898, 78.233, 151.7182));
+    p += dot(p, p.yzx + 33.33);
+    return fract((p.x + p.y) * p.z);
+}
 
-varying vec3 vColor;
-varying float vAlpha;
+vec3 hash3(vec3 p) {
+    vec3 q = vec3(dot(p, vec3(127.1, 311.7, 74.7)), dot(p, vec3(269.5, 183.3, 246.1)), dot(p, vec3(113.5, 271.9, 124.6)));
+    return fract(sin(q) * 43758.5453) * 2.0 - 1.0;
+}
 
+float vnoise3(vec3 x) {
+    vec3 p = floor(x);
+    vec3 f = fract(x);
+    f = f*f*(3.0-2.0*f);
+
+    return mix(mix(mix(hash(p+vec3(0.0, 0.0, 0.0)), hash(p+vec3(1.0, 0.0, 0.0)), f.x),
+                   mix(hash(p+vec3(0.0, 1.0, 0.0)), hash(p+vec3(1.0, 1.0, 0.0)), f.x), f.y),
+               mix(mix(hash(p+vec3(0.0, 0.0, 1.0)), hash(p+vec3(1.0, 0.0, 1.0)), f.x),
+                   mix(hash(p+vec3(0.0, 1.0, 1.0)), hash(p+vec3(1.0, 1.0, 1.0)), f.x), f.y), f.z) * 2.0 - 1.0;
+}
+
+float voronoi3(vec3 x) {
+    vec3 p = floor(x);
+    vec3 f = fract(x);
+    float res = 100.0;
+    for(int k=-1; k<=1; k++) {
+        for(int j=-1; j<=1; j++) {
+            for(int i=-1; i<=1; i++) {
+                vec3 b = vec3(float(i), float(j), float(k));
+                vec3 r = vec3(b) - f + hash3(p + b);
+                float d = dot(r, r);
+                res = min(res, d);
+            }
+        }
+    }
+    return sqrt(res) * 2.0 - 1.0;
+}
+
+float getNoiseVal(vec3 x) {
+    if (noiseType > 2.5) {
+        return vnoise3(x);
+    } else if (noiseType > 1.5) {
+        return voronoi3(x*1.5);
+    } else if (noiseType > 0.5) {
+        return abs(snoise3(x)) * 2.0 - 1.0;
+    } else {
+        return snoise3(x);
+    }
+}
+
+float fbm(vec3 x) {
+      float v = 0.0;
+      float a = 0.5;
+      vec3 shift = vec3(100.0);
+      for (int i = 0; i < 4; ++i) {
+          v += a * getNoiseVal(x);
+          x = x * 2.0 + shift;
+          a *= 0.5;
+      }
+      return v;
+  }
+
+  
+uniform vec3 cameraPos;
+uniform vec3 cameraDir;
+uniform vec3 cameraUp;
+uniform vec3 cameraRight;
+uniform float fovT;
+uniform vec2 resolution;
+float getDensity(vec3 p, float t) {
+    p.x /= stretchX;
+    p.y /= stretchY;
+    vec3 np = p * scale * 0.5;
+    // FDS Thermodynamics Approximation: Buoyancy causes vertical velocity to increase with height (temperature gradient)
+    vec3 advection = flowDirection * t * 0.5;
+    advection.y += (p.y + 1.0) * thermalBuoyancy * t * 0.5;
+    np -= advection;
+    np = getRotationMatrix(rotation + rotationSpeed * t) * np;
+
+    np.x += snoise3(np * 2.0 + vec3(0.0, -t, 0.0)) * distortion * 0.5;
+    np.z += snoise3(np * 2.0 + vec3(0.0, -t, t)) * distortion * 0.5;
+
+    float n = fbm(np);
+    float mask = 0.0;
+
+    if (shapeType > 1.5) {
+        float r = length(p.xz);
+        float ny = p.y;
+        vec3 warp = vec3(fbm(np * 2.0 + t), fbm(np * 2.5 - t), fbm(np * 2.0));
+        np += warp * (detail * 0.4);
+        n = fbm(np);
+        float taper = smoothstep(1.0, 0.2, abs(ny));
+        float width = 0.6 * taper;
+        vec3 shapeDist = p;
+        shapeDist.x += snoise3(vec3(p.y * 3.0, t * 0.5, 0.0)) * distortion * 0.2;
+        shapeDist.z += snoise3(vec3(0.0, t * 0.5, p.y * 3.0)) * distortion * 0.2;
+        float distFromCenter = abs(shapeDist.x) + abs(shapeDist.z)*0.5;
+        mask = 1.0 - smoothstep(width * 0.05, width + 0.2, distFromCenter);
+        mask *= taper;
+    } else if (shapeType > 0.5) {
+        float d = length(p);
+        mask = 1.0 - smoothstep(0.4, 0.9, d);
+    } else {
+        float r = length(p.xz);
+        float ny = (p.y + 0.9) * 0.52;
+        float powY = pow(max(0.0, ny), 1.2);
+        float width = mix(0.7, 0.05, powY);
+        mask = 1.0 - smoothstep(width * 0.1, width, r);
+        float topFade = 1.0 - smoothstep(0.55, 1.0, ny);
+        float bottomPinch = smoothstep(0.0, 0.2, ny);
+        mask *= topFade * mix(0.4, 1.0, bottomPinch);
+    }
+
+    mask *= smoothstep(-1.0, -0.7, p.y);
+
+    float density = (n * 0.5 + 0.5) * mask;
+    return pow(max(0.0, density), mix(coreBottom, coreTop, p.y * 0.5 + 0.5));
+}
 void main() {
-    if (vAlpha <= 0.05) discard;
-    vec3 col = vColor;
+    vec2 uv = vUv * 2.0 - 1.0;
+    float t = loopProgress * speed * 2.5;
+    vec2 puv = uv; puv.x *= resolution.x / resolution.y;
+    vec3 ro = cameraPos;
+    vec3 rd = normalize(cameraDir + puv.x * cameraRight * fovT + puv.y * cameraUp * fovT);
+    float max_dist = 7.0;
+    float step_size = 0.04;
+    float dist = max(0.0, length(ro) - 3.0);
+    vec3 col = vec3(0.0);
+    float alpha = 0.0;
+    for(int i = 0; i < 150; i++) {
+        vec3 p = ro + rd * dist;
+        float local_den = getDensity(p, t);
+        if(local_den > 0.005) {
+            float temp = mix(baseTemperature, peakTemperature, local_den);
+            vec3 emit = vec3(0.0);
+            if (useBlackbody) {
+                emit = blackbody(temp) * local_den * 2.0;
+            } else {
+                vec3 colMix = mix(color3, color2, smoothstep(0.0, 0.5, local_den));
+                emit = mix(colMix, color1, smoothstep(0.5, 1.0, local_den)) * local_den * 2.0;
+            }
+            emit *= step_size;
+            col += emit * (1.0 - alpha);
+            alpha += local_den * step_size * 1.5;
+            if(alpha > 0.98) { alpha = 1.0; break; }
+        }
+        dist += step_size;
+        if(dist > max_dist) break;
+    }
+    // Apply brightness and contrast
     col = col * brightness;
     col = (col - 0.5) * contrast + 0.5;
+
+    // Apply saturation
     float luma = dot(col, vec3(0.299, 0.587, 0.114));
     col = mix(vec3(luma), col, saturation);
-    
-    gl_FragColor = vec4(clamp(col, 0.0, 1.0), vAlpha * 0.8);
-}
 
+    // Apply alpha threshold map
+    float a = min(alpha * 1.2, 1.0);
+    a = mix(0.0, a, smoothstep(alphaThreshold, alphaThreshold + 0.1, a));
+
+    gl_FragColor = vec4(clamp(col, 0.0, 1.0), clamp(a, 0.0, 1.0));
+}
 `;
 
-export const FireGenerator: React.FC<FireGeneratorProps> = ({ onExport, onAttachToEmitter, embeddedUI, onExportToParticleSystem, autoRenderOnChange, particleCameraState }) => {
+export const FireGenerator: React.FC<FireGeneratorProps> = ({ onExport, onAttachToEmitter, embeddedUI, onExportToParticleSystem, autoRenderOnChange }) => {
   const mountRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const materialRef = useRef<THREE.ShaderMaterial | null>(null);
@@ -307,7 +379,7 @@ export const FireGenerator: React.FC<FireGeneratorProps> = ({ onExport, onAttach
           color1: '#ff0000', color2: '#ff6600', color3: '#ffff00',
           speed: 3.0, scale: 3.0, coreBottom: 1.5, coreTop: 1.0,
           brightness: 1.0, contrast: 1.0, saturation: 1.0,
-          frames: 64, fps: 30, resolution: 128, domainResolution: 24, emitterTurbulence: 0.5, emitterSpeed: 1.0,
+          frames: 64, fps: 30, resolution: 128,
           noiseType: 'simplex', distortion: 2.0, detail: 1.0, alphaThreshold: 0.0, flowX: 0, flowY: 1, flowZ: 0, rotX: 0, rotY: 0, rotZ: 0
         }
       },
@@ -317,7 +389,7 @@ export const FireGenerator: React.FC<FireGeneratorProps> = ({ onExport, onAttach
           color1: '#550000', color2: '#ff3300', color3: '#ffffff',
           speed: 4.0, scale: 3.5, coreBottom: 1.0, coreTop: 1.0,
           brightness: 1.8, contrast: 1.4, saturation: 1.2,
-          frames: 64, fps: 30, resolution: 128, domainResolution: 24,
+          frames: 64, fps: 30, resolution: 128,
           noiseType: 'simplex', distortion: 3.5, detail: 1.8, alphaThreshold: 0.2
         }
       },
@@ -330,7 +402,7 @@ export const FireGenerator: React.FC<FireGeneratorProps> = ({ onExport, onAttach
           color3: '#ffe173', // Superheated core
           speed: 2.0, scale: 4.0, coreBottom: 1.8, coreTop: 0.8,
           brightness: 1.5, contrast: 1.2, saturation: 1.0,
-          frames: 64, fps: 30, resolution: 128, domainResolution: 24,
+          frames: 64, fps: 30, resolution: 128,
           noiseType: 'voronoi', distortion: 3.0, detail: 1.5, alphaThreshold: 0.1, thermalBuoyancy: 3.5, vorticityConfinement: 2.5
         }
       },
@@ -341,7 +413,7 @@ export const FireGenerator: React.FC<FireGeneratorProps> = ({ onExport, onAttach
           color1: '#110000', color2: '#ff2200', color3: '#fff0aa',
           speed: 1.2, scale: 2.5, coreBottom: 2.0, coreTop: 0.9,
           brightness: 1.3, contrast: 1.1, saturation: 0.9,
-          frames: 64, fps: 60, resolution: 128, domainResolution: 24,
+          frames: 64, fps: 60, resolution: 128,
           noiseType: 'simplex', distortion: 4.0, detail: 2.0, alphaThreshold: 0.2, thermalBuoyancy: 1.2, vorticityConfinement: 4.0
         }
       },
@@ -351,7 +423,7 @@ export const FireGenerator: React.FC<FireGeneratorProps> = ({ onExport, onAttach
           color1: '#0000ff', color2: '#00ffff', color3: '#ffffff',
           speed: 4.0, scale: 2.5, coreBottom: 2.0, coreTop: 1.2,
           brightness: 1.2, contrast: 1.1, saturation: 1.5,
-          frames: 64, fps: 30, resolution: 128, domainResolution: 24,
+          frames: 64, fps: 30, resolution: 128,
           noiseType: 'simplex', distortion: 2.5, detail: 1.2
         }
       }
@@ -449,7 +521,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
       saturation: 1.0,
       frames: 30,
       fps: 30,
-      resolution: 128, domainResolution: 24,
+      resolution: 128,
       noiseType: 'voronoi' as 'simplex' | 'voronoi' | 'cellular' | 'value',
       thermalBuoyancy: 1.0,
       vorticityConfinement: 1.0,
@@ -470,43 +542,6 @@ const [params, setParams] = useState<GeneratorParams>(() => {
   useEffect(() => {
     localStorage.setItem('fireGeneratorParams', JSON.stringify(params));
   }, [params]);
-
-  // Update domain resolution dynamically
-  useEffect(() => {
-    if (!sceneRef.current || !materialRef.current) return;
-    const scene = sceneRef.current;
-    let oldMesh = null;
-    scene.children.forEach(c => {
-      if ((c as THREE.InstancedMesh).isInstancedMesh) oldMesh = c;
-    });
-    if (oldMesh) {
-      scene.remove(oldMesh);
-      ((oldMesh as any).geometry as THREE.BufferGeometry).dispose();
-      (oldMesh as any).dispose();
-    }
-
-    const GRID_SIZE = params.domainResolution || 24;
-    const DOMAIN_SIZE = 4.8;
-    const SPACING = DOMAIN_SIZE / GRID_SIZE;
-    const geometry = new THREE.BoxGeometry(SPACING*0.9, SPACING*0.9, SPACING*0.9);
-    const GRID_SIZE_Y = Math.floor(GRID_SIZE * 2.5);
-    const COUNT = GRID_SIZE * GRID_SIZE_Y * GRID_SIZE;
-    const mesh = new THREE.InstancedMesh(geometry, materialRef.current, COUNT); 
-
-    let idx = 0;
-    const dummy = new THREE.Object3D();
-    const offset = (GRID_SIZE / 2.0) * SPACING;
-    for (let x = 0; x < GRID_SIZE; x++) {
-        for (let y = 0; y < GRID_SIZE_Y; y++) {
-            for (let z = 0; z < GRID_SIZE; z++) {
-                dummy.position.set(x * SPACING - offset, y * SPACING - offset + 1.0, z * SPACING - offset);
-                dummy.updateMatrix();
-                mesh.setMatrixAt(idx++, dummy.matrix);
-            }
-        }
-    }
-    scene.add(mesh);
-  }, [params.domainResolution]);
 
   const paramsRef = useRef(params);
   useEffect(() => {
@@ -532,7 +567,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
     canvas2d.style.position = 'absolute';
     canvas2d.style.top = '0';
     canvas2d.style.left = '0';
-    // Removed pointerEvents='none' to allow OrbitControls
+    canvas2d.style.pointerEvents = 'none';
     const ctx2d = canvas2d.getContext('2d');
     mountRef.current.appendChild(canvas2d);
 
@@ -544,17 +579,12 @@ const [params, setParams] = useState<GeneratorParams>(() => {
     perspCam.position.set(0, 0.5, 4.0);
     perspCameraRef.current = perspCam;
 
-    const controls = new OrbitControls(perspCam, canvas2d);
+    const controls = new OrbitControls(perspCam, renderer.domElement);
     controls.enableDamping = true;
     controls.target.set(0, 0.5, 0);
     controlsRef.current = controls;
 
-    
-    const GRID_SIZE = params.domainResolution || 24;
-    const DOMAIN_SIZE = 4.8; // Keep overall fire volume constant
-    const SPACING = DOMAIN_SIZE / GRID_SIZE;
-    const geometry = new THREE.BoxGeometry(SPACING*0.9, SPACING*0.9, SPACING*0.9);
-
+    const geometry = new THREE.PlaneGeometry(2, 2);
     
     const material = new THREE.ShaderMaterial({
       vertexShader,
@@ -585,8 +615,6 @@ const [params, setParams] = useState<GeneratorParams>(() => {
         detail: { value: params.detail },
           
           alphaThreshold: { value: params.alphaThreshold || 0.0 },
-          emitterTurbulence: { value: params.emitterTurbulence ?? 0.5 },
-          emitterSpeed: { value: params.emitterSpeed ?? 1.0 },
           evolveOverLife: { value: params.evolveOverLife ? 1.0 : 0.0 },
           flowDirection: { value: new THREE.Vector3(params.flowX || 0, params.flowY || 1.0, params.flowZ || 0) },
           rotation: { value: new THREE.Vector3(params.rotX || 0, params.rotY || 0, params.rotZ || 0) },
@@ -603,30 +631,8 @@ const [params, setParams] = useState<GeneratorParams>(() => {
     });
     materialRef.current = material;
 
-    
-    const GRID_SIZE_Y = Math.floor(GRID_SIZE * 2.5);
-    const COUNT = GRID_SIZE * GRID_SIZE_Y * GRID_SIZE;
-    const mesh = new THREE.InstancedMesh(geometry, material, COUNT);
-
-    // Add additive blending back directly onto material
-    material.transparent = true;
-    material.blending = THREE.AdditiveBlending;
-    material.depthWrite = false;
-
-    let idx = 0;
-    const dummy = new THREE.Object3D();
-    const offset = (GRID_SIZE / 2.0) * SPACING;
-    for (let x = 0; x < GRID_SIZE; x++) {
-        for (let y = 0; y < GRID_SIZE_Y; y++) {
-            for (let z = 0; z < GRID_SIZE; z++) {
-                dummy.position.set(x * SPACING - offset, y * SPACING - offset + 1.0, z * SPACING - offset);
-                dummy.updateMatrix();
-                mesh.setMatrixAt(idx++, dummy.matrix);
-            }
-        }
-    }
+    const mesh = new THREE.Mesh(geometry, material);
     scene.add(mesh);
-
 
     let animationId: number;
     let clock = new THREE.Clock();
@@ -653,7 +659,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
           m.uniforms.resolution.value.set(rendererRef.current?.domElement.width || 1, rendererRef.current?.domElement.height || 1);
         }
       }
-      renderer.render(scene, perspCameraRef.current!);
+      renderer.render(scene, camera);
 
       if (ctx2d) {
         ctx2d.clearRect(0, 0, canvas2d.width, canvas2d.height);
@@ -733,8 +739,6 @@ const [params, setParams] = useState<GeneratorParams>(() => {
       if(materialRef.current.uniforms.globalWarpAmount) materialRef.current.uniforms.globalWarpAmount.value = params.globalWarpAmount || 0.0;
 
         materialRef.current.uniforms.alphaThreshold.value = params.alphaThreshold || 0.0;
-        materialRef.current.uniforms.emitterTurbulence.value = params.emitterTurbulence ?? 0.5;
-        materialRef.current.uniforms.emitterSpeed.value = params.emitterSpeed ?? 1.0;
         if (materialRef.current.uniforms.flowDirection) {
            materialRef.current.uniforms.flowDirection.value.set(params.flowX || 0, params.flowY || 1, params.flowZ || 0);
         }
@@ -750,7 +754,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
   const isAutoRenderingRef = useRef(false);
 
     const generateSequenceDataUrls = async (currentParams: GeneratorParams): Promise<string[]> => {
-      if (!rendererRef.current || !sceneRef.current || !perspCameraRef.current || !materialRef.current) {
+      if (!rendererRef.current || !sceneRef.current || !cameraRef.current || !materialRef.current) {
         return [];
       }
 
@@ -777,7 +781,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
         materialRef.current.uniforms.loopProgress.value = progress;
 
         renderer.setRenderTarget(renderTarget);
-        renderer.render(sceneRef.current, perspCameraRef.current);
+        renderer.render(sceneRef.current, cameraRef.current);
         renderer.setRenderTarget(null);
 
         const pixels = new Uint8Array(targetSize * targetSize * 4);
@@ -835,17 +839,6 @@ const [params, setParams] = useState<GeneratorParams>(() => {
       return dataUrls;
   };
 
-  // Synchronize camera with particle system
-  useEffect(() => {
-    if (particleCameraState && perspCameraRef.current && controlsRef.current) {
-      const distance = 4.0;
-      const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(particleCameraState.quaternion);
-      perspCameraRef.current.position.set(-dir.x * distance, -dir.y * distance + 0.5, -dir.z * distance);
-      perspCameraRef.current.lookAt(0, 0.5, 0);
-      controlsRef.current.update();
-    }
-  }, [particleCameraState]);
-
 // Auto-Update logic debounce
   useEffect(() => {
     if (!embeddedUI || !onExportToParticleSystem) return;
@@ -866,10 +859,10 @@ const [params, setParams] = useState<GeneratorParams>(() => {
     }, 400); // 400ms debounce
 
     return () => clearTimeout(timerId);
-  }, [params, embeddedUI, onExportToParticleSystem, particleCameraState]);
+  }, [params, embeddedUI, onExportToParticleSystem]);
 
   const handleExport = async () => {
-    if (!rendererRef.current || !materialRef.current || !sceneRef.current || !perspCameraRef.current) return;
+    if (!rendererRef.current || !materialRef.current || !sceneRef.current || !cameraRef.current) return;
     setIsRendering(true);
     setProgress(0);
 
@@ -887,7 +880,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
     for (let i = 0; i < params.frames; i++) {
         const progress = i / params.frames;
         materialRef.current.uniforms.loopProgress.value = progress;
-        rendererRef.current.render(sceneRef.current, perspCameraRef.current);
+        rendererRef.current.render(sceneRef.current, cameraRef.current);
         
         await new Promise<void>((resolve) => {
             rendererRef.current!.domElement.toBlob((blob) => {
@@ -911,7 +904,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
   };
 
   const handleAttachToEmitter = async () => {
-    if (!rendererRef.current || !materialRef.current || !sceneRef.current || !perspCameraRef.current || !onAttachToEmitter) return;
+    if (!rendererRef.current || !materialRef.current || !sceneRef.current || !cameraRef.current || !onAttachToEmitter) return;
     setIsRendering(true);
     setProgress(0);
 
@@ -926,7 +919,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
     for (let i = 0; i < params.frames; i++) {
         const progress = i / params.frames;
         materialRef.current.uniforms.loopProgress.value = progress;
-        rendererRef.current.render(sceneRef.current, perspCameraRef.current);
+        rendererRef.current.render(sceneRef.current, cameraRef.current);
         
         dataUrls.push(rendererRef.current.domElement.toDataURL('image/png'));
         setProgress((i + 1) / params.frames);
@@ -1017,14 +1010,6 @@ const [params, setParams] = useState<GeneratorParams>(() => {
             <span>{params.distortion.toFixed(2)}</span>
           </label>
           <input type="range" min="0.0" max="3.0" step="0.05" value={params.distortion} onChange={e => setParams({...params, distortion: parseFloat(e.target.value)})} style={{width:'100%'}}/>
-        </div>
-
-        <div>
-          <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-            <span>Domain Resolution</span>
-            <span>{params.domainResolution || 24}</span>
-          </label>
-          <input type="range" min="8" max="150" step="1" value={params.domainResolution || 24} onChange={e => setParams({...params, domainResolution: parseInt(e.target.value)})} style={{width:'100%'}}/>
         </div>
 
                 <div>
@@ -1189,22 +1174,6 @@ const [params, setParams] = useState<GeneratorParams>(() => {
             <span>{(params.alphaThreshold || 0).toFixed(2)}</span>
           </label>
           <input type="range" min="0.0" max="1.5" step="0.01" value={params.alphaThreshold || 0.0} onChange={e => setParams({...params, alphaThreshold: parseFloat(e.target.value)})} style={{width:'100%'}}/>
-        </div>
-
-        <div>
-          <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-            <span>Emitter Turbulence</span>
-            <span>{(params.emitterTurbulence ?? 0.5).toFixed(2)}</span>
-          </label>
-          <input type="range" min="0.0" max="2.0" step="0.05" value={params.emitterTurbulence ?? 0.5} onChange={e => setParams({...params, emitterTurbulence: parseFloat(e.target.value)})} style={{width:'100%'}}/>
-        </div>
-        
-        <div>
-          <label style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px'}}>
-            <span>Emitter Speed</span>
-            <span>{(params.emitterSpeed ?? 1.0).toFixed(2)}</span>
-          </label>
-          <input type="range" min="0.0" max="5.0" step="0.1" value={params.emitterSpeed ?? 1.0} onChange={e => setParams({...params, emitterSpeed: parseFloat(e.target.value)})} style={{width:'100%'}}/>
         </div>
         <hr style={{ borderColor: '#333', margin: '5px 0' }} />
         <div style={{ fontSize: '13px', fontWeight: 'bold' }}>Color Correction & Physics</div>
