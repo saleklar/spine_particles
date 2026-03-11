@@ -176,10 +176,10 @@ float voronoi3(vec3 x) {
     vec3 p = floor(x);
     vec3 f = fract(x);
     float res = 100.0;
-    for(int k=-1; k<=1; k++) {
-        for(int j=-1; j<=1; j++) {
-            for(int i=-1; i<=1; i++) {
-                vec3 b = vec3(float(i), float(j), float(k));
+    for(int k=0; k<=1; k++) {
+        for(int j=0; j<=1; j++) {
+            for(int i=0; i<=1; i++) {
+                vec3 b = vec3(float(i) - 0.5, float(j) - 0.5, float(k) - 0.5);
                 vec3 r = vec3(b) - f + hash3(p + b);
                 float d = dot(r, r);
                 res = min(res, d);
@@ -205,7 +205,11 @@ float fbm(vec3 x) {
     float v = 0.0;
     float a = 0.5;
     vec3 shift = vec3(100.0);
+    int octaves = (noiseType > 1.5 && noiseType < 2.5) ? 2 : 4;
+    int octaves = (noiseType > 1.5 && noiseType < 2.5) ? 2 : 4;
     for (int i = 0; i < 4; ++i) {
+        if (i >= octaves) break;
+        if (i >= octaves) break;
         v += a * getNoiseVal(x);
         x = x * 2.0 + shift;
         a *= 0.5;
@@ -422,7 +426,7 @@ export const FireGenerator: React.FC<FireGeneratorProps> = ({ onExport, onAttach
           color1: '#110000', color2: '#ff2200', color3: '#fff0aa',
           speed: 1.2, scale: 2.5, coreBottom: 2.0, coreTop: 0.9,
           brightness: 1.3, contrast: 1.1, saturation: 0.9,
-          frames: 64, fps: 60, resolution: 256,
+          frames: 64, fps: 60, resolution: 128,
           noiseType: 'simplex', distortion: 4.0, detail: 2.0, alphaThreshold: 0.2, thermalBuoyancy: 1.2, vorticityConfinement: 4.0
         }
       },
@@ -521,7 +525,7 @@ const [params, setParams] = useState<GeneratorParams>(() => {
       saturation: 1.0,
       frames: 30,
       fps: 30,
-      resolution: 256,
+      resolution: 128,
       noiseType: 'voronoi' as 'simplex' | 'voronoi' | 'cellular' | 'value',
       thermalBuoyancy: 1.0,
       vorticityConfinement: 1.0,
@@ -656,40 +660,37 @@ const [params, setParams] = useState<GeneratorParams>(() => {
   // We use a ref to prevent racing or overlapping renders
   const isAutoRenderingRef = useRef(false);
 
-  const generateSequenceDataUrls = async (currentParams: GeneratorParams): Promise<string[]> => {
-    return new Promise((resolve) => {
+    const generateSequenceDataUrls = async (currentParams: GeneratorParams): Promise<string[]> => {
       if (!rendererRef.current || !sceneRef.current || !cameraRef.current || !materialRef.current) {
-        resolve([]);
-        return;
+        return [];
       }
 
       const renderer = rendererRef.current;
-      
       const targetSize = currentParams.resolution;
-      
+
       const renderTarget = new THREE.WebGLRenderTarget(targetSize, targetSize, {
         format: THREE.RGBAFormat,
         type: THREE.UnsignedByteType,
         minFilter: THREE.LinearFilter,
         magFilter: THREE.LinearFilter
       });
-      
+
       const tempCanvas = document.createElement('canvas');
       tempCanvas.width = targetSize;
       tempCanvas.height = targetSize;
       const ctx = tempCanvas.getContext('2d');
-      if (!ctx) { resolve([]); return; }
+      if (!ctx) { return []; }
 
       const dataUrls: string[] = [];
-      
+
       for (let i = 0; i < currentParams.frames; i++) {
         const progress = i / currentParams.frames;
         materialRef.current.uniforms.loopProgress.value = progress;
-        
+
         renderer.setRenderTarget(renderTarget);
         renderer.render(sceneRef.current, cameraRef.current);
         renderer.setRenderTarget(null);
-        
+
         const pixels = new Uint8Array(targetSize * targetSize * 4);
         renderer.readRenderTargetPixels(renderTarget, 0, 0, targetSize, targetSize, pixels);
         
@@ -707,49 +708,44 @@ const [params, setParams] = useState<GeneratorParams>(() => {
             }
         }
 
-          // Apply glow and blur
-          const offCanvas = document.createElement('canvas');
-          offCanvas.width = targetSize;
-          offCanvas.height = targetSize;
-          const offCtx = offCanvas.getContext('2d');
-          
-          if (offCtx) {
-            offCtx.putImageData(imageData, 0, 0);
-            
-            ctx.clearRect(0, 0, targetSize, targetSize);
-            ctx.globalCompositeOperation = 'source-over';
-            ctx.filter = 'none';
-            ctx.drawImage(offCanvas, 0, 0);
-            
-            // First glow pass
-            ctx.globalCompositeOperation = 'screen';
-            ctx.filter = 'blur(4px)';
-            ctx.globalAlpha = 0.6;
-            ctx.drawImage(offCanvas, 0, 0);
-            
-            // Second glow pass
-            ctx.filter = 'blur(12px)';
-            ctx.globalAlpha = 0.3;
-            ctx.drawImage(offCanvas, 0, 0);
-            
-            // Reset state
-            ctx.globalCompositeOperation = 'source-over';
-            ctx.filter = 'none';
-            ctx.globalAlpha = 1.0;
-          } else {
-            ctx.putImageData(imageData, 0, 0);
-          }
-          
-          dataUrls.push(tempCanvas.toDataURL('image/png'));
+        const offCanvas = document.createElement('canvas');
+        offCanvas.width = targetSize;
+        offCanvas.height = targetSize;
+        const offCtx = offCanvas.getContext('2d');
+
+        if (offCtx) {
+          offCtx.putImageData(imageData, 0, 0);
+
+          ctx.clearRect(0, 0, targetSize, targetSize);
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.filter = 'none';
+          ctx.drawImage(offCanvas, 0, 0);
+
+          // First glow pass
+          ctx.globalCompositeOperation = 'screen';
+          ctx.filter = 'blur(4px)';
+          ctx.globalAlpha = 0.6;
+          ctx.drawImage(offCanvas, 0, 0);
+
+          // Second glow pass
+          ctx.filter = 'blur(12px)';
+          ctx.globalAlpha = 0.3;
+          ctx.drawImage(offCanvas, 0, 0);
+        } else {
+          ctx.putImageData(imageData, 0, 0);
         }
-          
-        renderTarget.dispose();
-      
-      resolve(dataUrls);
-    });
+
+        dataUrls.push(tempCanvas.toDataURL('image/png'));
+        
+        // Yield to browser event loop to prevent freezing!
+        await new Promise(r => setTimeout(r, 10));
+      }
+
+      renderTarget.dispose();
+      return dataUrls;
   };
 
-  // Auto-Update logic debounce
+// Auto-Update logic debounce
   useEffect(() => {
     if (!embeddedUI || !onExportToParticleSystem) return;
 
